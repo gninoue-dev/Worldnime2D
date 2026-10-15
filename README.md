@@ -22,14 +22,24 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.6 — contraintes.** On construit un squelette, on y attache les images d'un
-> personnage (ou on importe un fichier Krita / Photoshop), on les transforme en maillages déformables liés
-> à plusieurs os, on ajoute des contraintes (IK, transformation, chemin, physique), puis on anime avec
-> une timeline à clés et un éditeur de courbes. Les skins et l'export arrivent ensuite.
+> **État actuel : v0.7 — skins.** On construit un squelette, on y attache les images d'un personnage
+> (ou on importe un fichier Krita / Photoshop), on les transforme en maillages déformables liés à plusieurs
+> os, on ajoute des contraintes (IK, transformation, chemin, physique) et des skins (tenues), puis on anime
+> avec une timeline à clés et un éditeur de courbes. L'export pour les jeux arrive dans la prochaine version.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Skins et pièces jointes spéciales (v0.7)
+
+- **Skins** (onglet Skins) : plusieurs tenues pour un même squelette, combinables entre elles
+- Emplacements de skin : un même nom de pièce jointe dans plusieurs skins, chaque skin fournit sa version
+  (« Créer la version de la skin… » sur une pièce jointe)
+- Os et contraintes réservés à une skin (actifs seulement quand elle est active)
+- **Boîte de collision** (zones de touche), **découpe** (clipping : masque les slots suivants hors d'un
+  polygone, jusqu'à un slot de fin), **point** (position et direction pour un effet ou une arme)
+- Polygones modifiables dans la vue : glisser un sommet, clic sur une arête = nouveau sommet, Alt + clic = supprimer
 
 ### Contraintes (v0.6)
 

@@ -6,6 +6,7 @@ import { TreePanel, DrawOrderPanel, ImagesPanel } from './ui/tree.js';
 import { PropertiesPanel } from './ui/properties.js';
 import { TimelinePanel } from './ui/timeline.js';
 import { AnimationsPanel } from './ui/animations.js';
+import { SkinsPanel } from './ui/skins.js';
 import { Skeleton } from './model/skeleton.js';
 import { RegionAttachment } from './model/attachment.js';
 import { round } from './model/math.js';
@@ -227,6 +228,7 @@ async function start() {
       return file ? api.relativePath(editor.filePath, file) : null;
     },
   });
+  new SkinsPanel(editor, document.getElementById('skins'), notify);
   const timelineEl = document.getElementById('timeline');
   const timeline = new TimelinePanel(editor, timelineEl, notify);
 
@@ -238,7 +240,7 @@ async function start() {
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', String(on));
     }
-    for (const id of ['tree', 'draworder', 'images', 'animations']) document.getElementById(id).hidden = id !== tab;
+    for (const id of ['tree', 'draworder', 'images', 'animations', 'skins']) document.getElementById(id).hidden = id !== tab;
   };
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
   setTab('tree');

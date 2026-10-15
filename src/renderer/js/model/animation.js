@@ -338,19 +338,22 @@ export class Animation {
     }
 
     for (const [k, keys] of this.deform) {
-      const [, slotName, attName] = JSON.parse(k);
+      const [, slotName] = JSON.parse(k);
       const slot = skeleton.findSlot(slotName);
       if (!slot) continue;
+      // La déformation ne s'applique que si la pièce jointe affichée est celle de la timeline (dans sa skin).
+      const cur = skeleton.currentAttachment(slot);
+      if (!cur || cur.type !== 'mesh' || skeleton.deformKeyFor(slot, cur) !== k) continue;
       const v = sampleArray(keys, time);
       if (!v) continue;
       const p = slot.pose;
-      if (p.deformFor !== attName || !p.deform || p.deform.length !== v.length || alpha >= 1) {
-        const base = p.deformFor === attName && p.deform && p.deform.length === v.length ? p.deform : new Float32Array(v.length);
+      if (p.deformFor !== k || !p.deform || p.deform.length !== v.length || alpha >= 1) {
+        const base = p.deformFor === k && p.deform && p.deform.length === v.length ? p.deform : new Float32Array(v.length);
         p.deform = Float32Array.from(v, (x, i) => base[i] + (x - base[i]) * alpha);
       } else {
         for (let i = 0; i < v.length; i++) p.deform[i] += (v[i] - p.deform[i]) * alpha;
       }
-      p.deformFor = attName;
+      p.deformFor = k;
     }
 
     for (const [k, keys] of this.constraints) {

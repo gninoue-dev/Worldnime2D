@@ -12,6 +12,7 @@ import { Container, Graphics, Matrix, Mesh, MeshGeometry, Shader, Sprite, Unifor
 import { RegionAttachment } from '../model/attachment.js';
 import { MeshAttachment } from '../model/mesh.js';
 import { affineFromTriangles } from '../model/geometry.js';
+import { ClippingAttachment } from '../model/special.js';
 import { hexToRgba } from '../model/color.js';
 
 const VERTEX = /* glsl */ `
@@ -78,24 +79,57 @@ export class AttachmentsView {
   // ghost : { color: [r, g, b], alpha } pour dessiner un « fantôme » (pelure d'oignon).
   update(skeleton, ghost = null) {
     this.container.removeChildren();
+    for (const g of this.clipGroups ?? []) g.destroy({ children: false });
+    this.clipGroups = [];
     this.missing.clear();
     if (!this.visible) {
       this.container.addChild(this.missing);
       return;
     }
     const used = new Set();
+    // Découpe en cours : les images sont ajoutées dans un groupe masqué par le polygone.
+    let clip = null;
+    const closeClipIf = (slot) => {
+      if (clip && clip.end === slot.name) clip = null;
+    };
     for (const slot of skeleton.drawOrder) {
+      // Os réservé à une skin inactive : ses images ne s'affichent pas.
+      if (slot.bone.active === false) {
+        closeClipIf(slot);
+        continue;
+      }
       const att = skeleton.currentAttachment(slot);
-      if (!att) continue;
+      if (att instanceof ClippingAttachment && !ghost) {
+        const v = att.worldVertices(slot.bone);
+        const group = new Container();
+        const mask = new Graphics().poly(Array.from(v)).fill({ color: 0xffffff });
+        group.addChild(mask);
+        group.mask = mask;
+        this.container.addChild(group);
+        this.clipGroups.push(group);
+        clip = { end: att.end, group };
+        continue;
+      }
+      if (!att) {
+        closeClipIf(slot);
+        continue;
+      }
       const isMesh = att instanceof MeshAttachment;
-      if (!isMesh && !(att instanceof RegionAttachment)) continue;
+      if (!isMesh && !(att instanceof RegionAttachment)) {
+        closeClipIf(slot);
+        continue;
+      }
       const geo = isMesh ? meshGeometry(skeleton, slot, att) : {
         verts: att.worldVertices(slot.bone), uvs: RegionAttachment.UVS, indices: RegionAttachment.INDICES, key: 'region',
       };
-      if (!geo) continue;
+      if (!geo) {
+        closeClipIf(slot);
+        continue;
+      }
       const entry = this.library.get(att.imagePath);
       if (!entry) {
         if (!ghost) this.drawMissing(geo);
+        closeClipIf(slot);
         continue;
       }
       used.add(slot.name);
@@ -111,7 +145,8 @@ export class AttachmentsView {
       else if (isMesh) item = this.trianglesItem(slot, entry.texture, geo, light);
       else item = this.spriteItem(slot, entry.texture, geo.verts, light);
       item.mesh.blendMode = PIXI_BLEND[slot.blend] ?? 'normal';
-      this.container.addChild(item.mesh);
+      (clip?.group ?? this.container).addChild(item.mesh);
+      closeClipIf(slot);
     }
     this.container.addChild(this.missing);
     // Libère les meshes des slots disparus.

@@ -626,7 +626,9 @@ export class Editor extends EventTarget {
     const sk = this.skeleton;
     const slot = sk.addSlot(sk.uniqueSlotName(src.name), bone, sk.slots.indexOf(src) + 1);
     for (const k of ['color', 'dark', 'attachment', 'blend']) slot[k] = src[k];
-    for (const [name, att] of sk.defaultSkin.attachmentsOf(src.name)) sk.addAttachment(slot, att.copy(name));
+    for (const skin of sk.skins) {
+      for (const [name, att] of skin.attachmentsOf(src.name)) sk.addAttachment(slot, att.copy(name), skin);
+    }
     return slot;
   }
 

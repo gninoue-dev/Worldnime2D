@@ -9,18 +9,21 @@ import { BLEND_MODES } from './slot.js';
 import { RegionAttachment, ATTACHMENT_TYPES } from './attachment.js';
 import { MeshAttachment } from './mesh.js';
 import { PathAttachment } from './path.js';
+import { BoundingBoxAttachment, ClippingAttachment, PointAttachment } from './special.js';
 import { CONSTRAINT_CLASSES, CONSTRAINT_FIELDS } from './constraints.js';
 import { WHITE, isRgb, isRgba } from './color.js';
 import { round } from './math.js';
 import { animationToJSON, animationFromJSON, EventData } from './animation.js';
 
 export const FORMAT_NAME = 'worldnime2d';
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 export const FILE_EXTENSION = 'wn2d';
 
 export function serializeProject(skeleton, meta = {}) {
   const skel = { name: skeleton.name };
   if (skeleton.fps !== 30) skel.fps = skeleton.fps;
+  if (skeleton.activeSkins.length) skel.activeSkins = [...skeleton.activeSkins];
+  if (skeleton.editSkinName) skel.editSkin = skeleton.editSkinName;
   if (skeleton.images) skel.images = skeleton.images;
   if (skeleton.reference) {
     const r = skeleton.reference;
@@ -66,7 +69,11 @@ export function serializeProject(skeleton, meta = {}) {
         attachments[slot.name] = {};
         for (const [name, att] of m) attachments[slot.name][name] = serializeAttachment(att);
       }
-      return { name: skin.name, attachments };
+      const out = { name: skin.name };
+      if (skin.bones.size) out.bones = [...skin.bones];
+      if (skin.constraints.size) out.constraints = [...skin.constraints];
+      out.attachments = attachments;
+      return out;
     }),
     ...serializeConstraints(skeleton),
     events: Object.fromEntries([...skeleton.events.values()].map((e) => {
@@ -98,6 +105,20 @@ function serializeConstraints(skeleton) {
 
 function serializeAttachment(att) {
   if (att instanceof MeshAttachment) return serializeMesh(att);
+  if (att instanceof BoundingBoxAttachment || att instanceof ClippingAttachment) {
+    const o = { type: att.type, vertices: att.vertices.flatMap(([x, y]) => [round(x, 3), round(y, 3)]) };
+    if (att instanceof ClippingAttachment && att.end) o.end = att.end;
+    if (att.color !== new att.constructor('').color) o.color = att.color;
+    return o;
+  }
+  if (att instanceof PointAttachment) {
+    const o = { type: 'point' };
+    if (att.x) o.x = round(att.x, 3);
+    if (att.y) o.y = round(att.y, 3);
+    if (att.rotation) o.rotation = round(att.rotation, 3);
+    if (att.color !== '#f1f100ff') o.color = att.color;
+    return o;
+  }
   if (att instanceof PathAttachment) {
     const o = { type: 'path' };
     if (att.closed) o.closed = true;
@@ -227,21 +248,30 @@ export function parseProject(text) {
   }
 
   for (const skd of data.skins ?? []) {
-    if (skd.name !== 'default') continue; // Les autres skins arriveront en v0.7.
+    if (typeof skd.name !== 'string' || !skd.name) throw new Error('Une skin n\'a pas de nom.');
+    const skin = skd.name === 'default' ? skeleton.defaultSkin : skeleton.addSkin(skd.name);
+    for (const b of skd.bones ?? []) {
+      if (!skeleton.findBone(b)) throw new Error(`Os inconnu dans la skin « ${skd.name} » : ${b}.`);
+      skin.bones.add(b);
+    }
+    for (const c of skd.constraints ?? []) skin.constraints.add(String(c));
     for (const [slotName, atts] of Object.entries(skd.attachments ?? {})) {
       const slot = skeleton.findSlot(slotName);
       if (!slot) throw new Error(`Slot introuvable dans la skin : « ${slotName} ».`);
       for (const [name, ad] of Object.entries(atts)) {
-        skeleton.addAttachment(slot, parseAttachment(name, ad, `« ${slotName}/${name} »`, skeleton));
+        skeleton.addAttachment(slot, parseAttachment(name, ad, `« ${skd.name}/${slotName}/${name} »`, skeleton), skin);
       }
     }
   }
+  skeleton.activeSkins = (data.skeleton?.activeSkins ?? []).filter((n) => typeof n === 'string' && skeleton.findSkin(n) && n !== 'default');
+  const editSkin = data.skeleton?.editSkin;
+  skeleton.editSkinName = typeof editSkin === 'string' && skeleton.findSkin(editSkin) && editSkin !== 'default' ? editSkin : null;
   for (const slot of skeleton.slots) {
-    if (slot.attachment && !skeleton.getAttachment(slot, slot.attachment)) slot.attachment = null;
+    if (slot.attachment && !skeleton.skins.some((s) => s.get(slot.name, slot.attachment))) slot.attachment = null;
   }
-  for (const { slotName, att } of skeleton.meshes()) {
+  for (const { skin, slotName, att } of skeleton.meshes()) {
     if (!att.parent) continue;
-    const p = skeleton.defaultSkin.get(slotName, att.parent);
+    const p = skin.get(slotName, att.parent) ?? skeleton.defaultSkin.get(slotName, att.parent);
     if (!(p instanceof MeshAttachment) || p.parent) throw new Error(`Maillage parent introuvable pour « ${slotName}/${att.name} ».`);
   }
 
@@ -267,6 +297,10 @@ export function parseProject(text) {
         else c[f] = String(cd[f]);
       }
     }
+  }
+
+  for (const skin of skeleton.skins) {
+    for (const c of skin.constraints) if (!skeleton.findConstraint(c)) throw new Error(`Contrainte inconnue dans la skin « ${skin.name} » : ${c}.`);
   }
 
   const fps = data.skeleton?.fps;
@@ -341,6 +375,28 @@ function parseMesh(name, ad, where, skeleton) {
 
 function parseAttachment(name, ad, where, skeleton) {
   const type = ad.type ?? ATTACHMENT_TYPES.region;
+  if (type === 'boundingbox' || type === 'clipping') {
+    const a = type === 'clipping' ? new ClippingAttachment(name) : new BoundingBoxAttachment(name);
+    if (!Array.isArray(ad.vertices) || ad.vertices.length % 2 || ad.vertices.length < 6) throw new Error(`Polygone invalide (${where}).`);
+    for (let i = 0; i < ad.vertices.length; i += 2) a.vertices.push([num(ad.vertices[i], 0, where), num(ad.vertices[i + 1], 0, where)]);
+    if (ad.color !== undefined) {
+      if (!isRgba(ad.color)) throw new Error(`Couleur invalide pour ${where}.`);
+      a.color = ad.color.toLowerCase();
+    }
+    if (type === 'clipping') a.end = str(ad.end, null, `end (${where})`);
+    return a;
+  }
+  if (type === 'point') {
+    const a = new PointAttachment(name);
+    a.x = num(ad.x, 0, `x (${where})`);
+    a.y = num(ad.y, 0, `y (${where})`);
+    a.rotation = num(ad.rotation, 0, `rotation (${where})`);
+    if (ad.color !== undefined) {
+      if (!isRgba(ad.color)) throw new Error(`Couleur invalide pour ${where}.`);
+      a.color = ad.color.toLowerCase();
+    }
+    return a;
+  }
   if (type === 'path') {
     const p = new PathAttachment(name);
     p.closed = ad.closed === true;

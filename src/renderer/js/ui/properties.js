@@ -14,6 +14,7 @@ import { bindAuto, unbind, smoothWeights, pruneWeights, boundBones, DEFAULT_MAX_
 import { generateContour, addInteriorGrid, retriangulateMesh, resetToRectangle, setupPositions, setupWorld } from '../editor/meshtools.js';
 import { deformKey, CONSTRAINT_TIMELINES } from '../model/animation.js';
 import { PathAttachment, straightPath } from '../model/path.js';
+import { BoundingBoxAttachment, ClippingAttachment, PointAttachment, squarePolygon, isPolygonAttachment } from '../model/special.js';
 import { CONSTRAINT_LABELS, POSITION_MODES, SPACING_MODES, ROTATE_MODES } from '../model/constraints.js';
 
 export class PropertiesPanel {
@@ -86,7 +87,26 @@ export class PropertiesPanel {
     }
     if (kind === 'bone') out.push({ title: 'Os', rows: this.boneRows(editor.selected) });
     if (kind === 'slot') out.push({ title: 'Slot', rows: this.slotRows(editor.selectedSlot) });
-    if (kind === 'attachment' && editor.attachment instanceof PathAttachment) {
+    if (kind === 'attachment' && editor.attachment) {
+      const skin = sk.skinOf(editor.selectedSlot, editor.attachment);
+      const target = sk.editSkin;
+      const rows = [{ type: 'info', text: () => `Skin : « ${skin?.name ?? '?'} »` }];
+      if (target !== skin && !target.get(editor.selectedSlot.name, editor.attachment.name)) {
+        rows.push({
+          type: 'button', label: '', text: () => `Créer la version de la skin « ${target.name} »`,
+          title: 'Copie cette pièce jointe sous le même nom dans la skin sélectionnée (onglet Skins) : changez ensuite son image.',
+          onClick: () => this.change(() => {
+            const slot = editor.selectedSlot;
+            const copy = editor.attachment.copy(editor.attachment.name);
+            sk.addAttachment(slot, copy, target);
+          }),
+        });
+      }
+      out.push({ title: 'Skin', rows });
+    }
+    if (kind === 'attachment' && (isPolygonAttachment(editor.attachment) || editor.attachment instanceof PointAttachment)) {
+      out.push({ title: { boundingbox: 'Boîte de collision', clipping: 'Découpe (clipping)', point: 'Point' }[editor.attachment.type], rows: this.specialRows(editor.selectedSlot, editor.attachment) });
+    } else if (kind === 'attachment' && editor.attachment instanceof PathAttachment) {
       out.push({ title: 'Chemin', rows: this.pathRows(editor.selectedSlot, editor.attachment) });
     } else if (kind === 'attachment' && editor.attachment instanceof MeshAttachment) {
       out.push(...this.meshSections(editor.selectedSlot, editor.attachment));
@@ -129,7 +149,7 @@ export class PropertiesPanel {
           this.imageRow(mesh),
           {
             type: 'select', label: 'Parent',
-            options: () => [...sk.defaultSkin.attachmentsOf(slot.name).values()]
+            options: () => [...sk.attachmentsOf(slot).values()].map((e) => e.att)
               .filter((a) => a instanceof MeshAttachment && !a.parent).map((a) => [a.name, a.name]),
             get: () => mesh.parent,
             set: (v) => this.change(() => { mesh.parent = v; }),
@@ -207,7 +227,7 @@ export class PropertiesPanel {
           r.x = c[0];
           r.y = c[1];
           sk.clearDeform(slot.name, mesh.name);
-          sk.defaultSkin.set(slot.name, mesh.name, r);
+          sk.replaceAttachment(slot, mesh.name, r);
         }),
       },
       ...colorRows(mesh, 'color', (fn) => this.change(fn)),
@@ -286,7 +306,7 @@ export class PropertiesPanel {
   deformRows(slot, mesh) {
     const ed = this.editor;
     const sk = ed.skeleton;
-    const name = sk.deformName(slot, mesh);
+    const key = sk.deformKeyFor(slot, mesh);
     return [
       {
         type: 'button', label: '', text: () => '✥ Déformer le maillage (FFD)', active: () => ed.meshTool === 'deform',
@@ -300,7 +320,7 @@ export class PropertiesPanel {
       {
         type: 'button', label: '', text: () => 'Remettre la forme d\'origine (clé à cette image)',
         onClick: () => this.change(() => {
-          ed.animation?.setKey('deform', deformKey(slot.name, name), 'deform', { time: ed.time });
+          ed.animation?.setKey('deform', key, 'deform', { time: ed.time });
         }),
       },
       {
@@ -356,6 +376,9 @@ export class PropertiesPanel {
       { type: 'button', label: '', text: () => '＋ Contrainte de transformation', onClick: () => this.createConstraint('transform', bone) },
       { type: 'button', label: '', text: () => '＋ Contrainte de chemin (crée un chemin)', onClick: () => this.createConstraint('path', bone) },
       { type: 'button', label: '', text: () => '＋ Contrainte physique', onClick: () => this.createConstraint('physics', bone) },
+      { type: 'button', label: '', text: () => '＋ Boîte de collision sur cet os', onClick: () => this.createSpecial(bone, 'boundingbox') },
+      { type: 'button', label: '', text: () => '＋ Découpe (clipping) sur cet os', onClick: () => this.createSpecial(bone, 'clipping') },
+      { type: 'button', label: '', text: () => '＋ Point sur cet os', onClick: () => this.createSpecial(bone, 'point') },
       { type: 'button', label: '', text: () => '＋ Chemin (pièce jointe) sur cet os', onClick: () => this.change(() => {
         const sk2 = this.editor.skeleton;
         const slot = sk2.addSlot(sk2.uniqueSlotName(`${bone.name}_chemin`), bone);
@@ -365,6 +388,55 @@ export class PropertiesPanel {
         this.editor.selectedAttachment = slot.name;
       }) },
     );
+    return rows;
+  }
+
+  // --- Pièces jointes spéciales ------------------------------------------------------------
+
+  createSpecial(bone, type) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    const names = { boundingbox: 'collision', clipping: 'decoupe', point: 'point' };
+    this.change(() => {
+      const slot = sk.addSlot(sk.uniqueSlotName(`${bone.name}_${names[type]}`), bone);
+      let att;
+      if (type === 'point') att = new PointAttachment(slot.name);
+      else {
+        att = type === 'clipping' ? new ClippingAttachment(slot.name) : new BoundingBoxAttachment(slot.name);
+        att.vertices = squarePolygon(Math.max(60, bone.length));
+      }
+      sk.addAttachment(slot, att);
+      slot.attachment = att.name;
+      ed.selectedSlot = slot;
+      ed.selectedAttachment = att.name;
+    });
+  }
+
+  specialRows(slot, att) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    const rows = [{
+      type: 'text', label: 'Nom', get: () => att.name,
+      set: (v) => this.change(() => {
+        sk.renameAttachment(slot, att.name, v);
+        ed.selectedAttachment = v.trim();
+      }),
+    }];
+    if (att instanceof PointAttachment) {
+      const num = (k, label, unit) => ({ type: 'number', label, step: 1, unit, get: () => att[k], set: (v) => this.change(() => { att[k] = v; }) });
+      rows.push(num('x', 'X'), num('y', 'Y'), num('rotation', 'Rotation', '°'));
+    } else {
+      rows.push({ type: 'info', text: () => `${att.vertices.length} sommets. Dans la vue : glisser un sommet, clic sur une arête = nouveau sommet, Alt + clic = supprimer.` });
+    }
+    if (att instanceof ClippingAttachment) {
+      rows.push({
+        type: 'select', label: 'Dernier slot découpé',
+        options: () => [['', '(jusqu\'à la fin)'], ...sk.slots.filter((s) => s !== slot).map((s) => [s.name, s.name])],
+        get: () => att.end ?? '', set: (v) => this.change(() => { att.end = v || null; }),
+      });
+      rows.push({ type: 'info', text: () => 'Les slots dessinés après celui-ci (jusqu\'au dernier slot découpé) ne s\'affichent qu\'à l\'intérieur du polygone.' });
+    }
+    rows.push({ type: 'color', label: 'Couleur', get: () => att.color.slice(0, 7), set: (v) => this.change(() => { att.color = `${v}ff`; }) });
     return rows;
   }
 
@@ -468,7 +540,7 @@ export class PropertiesPanel {
     if (c.kind === 'path') {
       rows.push({
         type: 'select', label: 'Chemin (slot)',
-        options: () => sk.slots.filter((s) => [...sk.defaultSkin.attachmentsOf(s.name).values()].some((a) => a instanceof PathAttachment))
+        options: () => sk.slots.filter((s) => [...sk.attachmentsOf(s).values()].some((e) => e.att instanceof PathAttachment))
           .map((s) => [s.name, s.name]),
         get: () => c.target, set: set('target'),
       });
@@ -622,7 +694,7 @@ export class PropertiesPanel {
       { type: 'info', text: () => `Slot « ${slot.name} » (os « ${slot.bone.name} »), image ${ed.frame}.` },
       {
         type: 'select', label: 'Visible', key: { owner: 'slot', name: slot.name, type: 'attachment' },
-        options: () => [['', '(aucune)'], ...[...sk.defaultSkin.attachmentsOf(slot.name).keys()].map((n) => [n, n])],
+        options: () => [['', '(aucune)'], ...[...sk.attachmentsOf(slot).keys()].map((n) => [n, n])],
         get: () => p.attachment ?? '',
         set: (v) => this.change(() => {
           p.attachment = v || null;
@@ -668,7 +740,7 @@ export class PropertiesPanel {
       },
       {
         type: 'select', label: 'Visible',
-        options: () => [['', '(aucune)'], ...[...sk.defaultSkin.attachmentsOf(slot.name).keys()].map((n) => [n, n])],
+        options: () => [['', '(aucune)'], ...[...sk.attachmentsOf(slot).keys()].map((n) => [n, n])],
         get: () => slot.attachment ?? '',
         set: (v) => this.change(() => { slot.attachment = v || null; }),
       },
@@ -696,7 +768,7 @@ export class PropertiesPanel {
     const toMesh = {
       type: 'button', label: '', text: () => '▦ Convertir en maillage (déformable)',
       onClick: () => this.change(() => {
-        sk.defaultSkin.set(slot.name, att.name, meshFromRegion(att));
+        sk.replaceAttachment(slot, att.name, meshFromRegion(att));
       }),
     };
     const num = (key, label, step, unit, min) => ({
@@ -760,6 +832,7 @@ export class PropertiesPanel {
       editor.attachment, editor.attachment?.type, Boolean(editor.attachment?.weights), editor.attachment?.parent,
       editor.selectedSlot && sk.currentAttachment(editor.selectedSlot)?.type, editor.selectedConstraint,
       editor.constraint?.kind, editor.constraint?.positionMode,
+      sk.editSkin, editor.attachment && sk.skinOf(editor.selectedSlot, editor.attachment),
     ];
     const changed = !this.signature || sig.some((v, i) => v !== this.signature[i]);
     if (changed) this.build();

@@ -332,3 +332,8 @@ body.animating .viewport { box-shadow: inset 0 0 0 2px rgba(229, 115, 115, 0.55)
 .constraint-icon.transform { border-color: #4dd0e1; border-radius: 2px; }
 .constraint-icon.path { border-color: #ff9800; }
 .constraint-icon.physics { border-color: #f06292; border-style: dotted; }
+.skin-list { margin: 0 10px 8px; max-height: 140px; }
+.tab { padding: 0 6px; }
+.shape-icon { width: 10px; height: 10px; flex: none; border: 1.5px solid #60f000; }
+.shape-icon.clip { border-color: #ce3a3a; transform: rotate(45deg) scale(0.8); }
+.shape-icon.point { border-color: #f1f100; border-radius: 50%; width: 8px; height: 8px; }

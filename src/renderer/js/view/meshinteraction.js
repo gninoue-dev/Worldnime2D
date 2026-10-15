@@ -7,7 +7,6 @@
 // Le rayon doux (editor.softRadius, en pixels écran) entraîne aussi les sommets voisins.
 
 import { MeshAttachment } from '../model/mesh.js';
-import { deformKey } from '../model/animation.js';
 import { insertVertex, deleteVertices, setupPositions, setupWorld, applyPositions, toggleEdge } from '../editor/meshtools.js';
 import { paintWeights } from '../model/weights.js';
 import { distToSegment } from '../model/math.js';
@@ -167,7 +166,7 @@ export class MeshInteraction {
       this.drag = { kind: 'move', t, start: w, f, positions: setupPositions(sk, t.slot, t.source) };
     } else {
       const src = t.source;
-      const name = sk.deformName(t.slot, t.att);
+      const name = sk.deformKeyFor(t.slot, t.att);
       const pose = t.slot.pose;
       const base = pose.deformFor === name && pose.deform?.length === src.deformLength
         ? Float32Array.from(pose.deform) : new Float32Array(src.deformLength);
@@ -241,9 +240,9 @@ export class MeshInteraction {
     ed.emit('drag');
   }
 
-  keyDeform(slot, name, offsets) {
+  keyDeform(slot, key, offsets) {
     const ed = this.editor;
-    ed.animation?.setKey('deform', deformKey(slot.name, name), 'deform', {
+    ed.animation?.setKey('deform', key, 'deform', {
       time: ed.time, vertices: Array.from(offsets, (v) => Math.round(v * 1000) / 1000),
     });
   }

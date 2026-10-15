@@ -60,11 +60,11 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Contrainte physique (ressorts, inertie, gravité, vent)
 - [x] Ordre d'évaluation des contraintes
 
-## v0.7 — Skins et autres pièces jointes
+## v0.7 — Skins et autres pièces jointes ✅
 
-- [ ] Skins : plusieurs tenues pour un même squelette, emplacements de skin
-- [ ] Os et contraintes propres à une skin
-- [ ] Boîtes de collision (bounding box), découpe (clipping), points
+- [x] Skins : plusieurs tenues pour un même squelette, emplacements de skin, skins combinées
+- [x] Os et contraintes propres à une skin
+- [x] Boîtes de collision (bounding box), découpe (clipping), points
 
 ## v0.8 — Prévisualisation et export
 

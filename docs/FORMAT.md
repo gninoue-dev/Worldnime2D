@@ -78,8 +78,14 @@ Liste ordonnée : c'est **l'ordre d'affichage**. Le premier slot est dessiné au
 
 ## `skins`
 
-Pour l'instant, seule la skin `default` est utilisée. `attachments` associe à chaque nom de slot
-ses pièces jointes, par nom. Type `region` (une image), le seul en v0.2 :
+Liste de skins `{ "name", "bones"?, "constraints"?, "attachments" }`. La skin `default` est toujours active.
+`attachments` associe à chaque nom de slot ses pièces jointes, par nom. Une pièce jointe se cherche dans les
+skins actives (`skeleton.activeSkins`, la dernière l'emporte), puis dans `default` : un même nom dans plusieurs
+skins est un emplacement que chaque skin remplit à sa façon. `bones` et `constraints` : os et contraintes
+réservés à la skin (actifs seulement quand elle est active). `skeleton.editSkin` : skin où l'éditeur ajoute
+les nouvelles pièces jointes.
+
+Type `region` (une image) :
 
 | Champ | Type | Défaut | Rôle |
 |---|---|---|---|
@@ -171,6 +177,12 @@ l'animation dans l'ordre croissant de `order`.
 | `path` | slot qui affiche un chemin | `positionMode` (`fixed`, `percent`), `spacingMode` (`length`, `fixed`, `percent`, `proportional`), `rotateMode` (`tangent`, `chain`, `chainScale`), `offsetRotation`, `position`, `spacing`, `mixRotate`, `mixX`, `mixY` |
 | `physics` | — | `x`, `y`, `rotate`, `scaleX`, `shearX` (part simulée, 0 à 1), `limit`, `step`, `inertia`, `strength`, `damping`, `mass`, `wind`, `gravity`, `mix` |
 
+### Boîtes de collision, découpes, points
+
+- `"type": "boundingbox"` : `vertices` (polygone aplati, repère de l'os du slot), `color`.
+- `"type": "clipping"` : `vertices`, `end` (dernier slot découpé ; absent = jusqu'à la fin de l'ordre d'affichage), `color`.
+- `"type": "point"` : `x`, `y`, `rotation`, `color`.
+
 ### Chemins (`"type": "path"`)
 
 `vertices` : pour chaque point, poignée d'entrée, point, poignée de sortie (repère de l'os du slot),
@@ -191,6 +203,7 @@ aplatis `[ix, iy, px, py, ox, oy, …]`. `closed` : le dernier point rejoint le 
 - `3` : v0.3, animations, événements, cadence de la timeline.
 - `4` : v0.5, maillages, maillages liés, poids, déformations animées.
 - `5` : v0.6, contraintes IK, transformation, chemin, physique ; pièces jointes chemin.
+- `6` : v0.7, skins multiples (os et contraintes de skin), boîtes de collision, découpes, points.
 
 Une version de l'éditeur lit tous les fichiers plus anciens. `formatVersion` augmente quand le format change. Une version de l'éditeur refuse un fichier
 dont le `formatVersion` est plus récent que ce qu'elle connaît.

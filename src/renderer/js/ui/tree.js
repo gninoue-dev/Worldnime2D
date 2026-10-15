@@ -143,7 +143,8 @@ export class TreePanel {
     };
 
     const addSlot = (slot, depth) => {
-      const atts = sk.defaultSkin.attachmentsOf(slot.name);
+      // Pièces jointes visibles avec les skins actives : Map nom → { att, skin }.
+      const atts = sk.attachmentsOf(slot);
       const open = row({
         key: `s:${slot.name}`,
         depth,
@@ -161,7 +162,7 @@ export class TreePanel {
         },
       });
       if (!open) return;
-      for (const [name, att] of atts) {
+      for (const [name, { att, skin }] of atts) {
         // En mode Animation, le rond montre et anime la pose courante (clé de pièce jointe).
         const animating = editor.animating;
         const visible = (animating ? slot.pose.attachment : slot.attachment) === name;
@@ -180,13 +181,16 @@ export class TreePanel {
           });
         });
         eye.addEventListener('dblclick', (e) => e.stopPropagation());
-        const isPath = att.type === 'path';
-        const missing = !isPath && !this.actions.hasImage(att.imagePath);
-        const kindClass = isPath ? 'path-icon' : att.type === 'mesh' ? 'att-icon mesh' : 'att-icon';
+        const hasImage = att.type === 'region' || att.type === 'mesh';
+        const missing = hasImage && !this.actions.hasImage(att.imagePath);
+        const kindClass = {
+          path: 'path-icon', mesh: 'att-icon mesh', boundingbox: 'shape-icon box', clipping: 'shape-icon clip', point: 'shape-icon point',
+        }[att.type] ?? 'att-icon';
         row({
           key: `a:${slot.name}/${name}`,
           depth: depth + 1,
-          label: missing ? `${name}  (image manquante)` : att.parent ? `${name}  (lié à ${att.parent})` : name,
+          label: (missing ? `${name}  (image manquante)` : att.parent ? `${name}  (lié à ${att.parent})` : name)
+            + (skin.name !== 'default' ? `  [${skin.name}]` : ''),
           icon: iconEl(missing ? `${kindClass} missing` : kindClass),
           extra: eye,
           selected: editor.selectionKind === 'attachment' && editor.selectedSlot === slot && editor.selectedAttachment === name,

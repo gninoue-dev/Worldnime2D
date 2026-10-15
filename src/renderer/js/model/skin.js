@@ -6,6 +6,9 @@ export class Skin {
     this.name = name;
     // Map nomDuSlot → Map nomDeLaPièceJointe → pièce jointe. L'ordre d'insertion est conservé.
     this.attachments = new Map();
+    // Os et contraintes réservés à cette skin (actifs seulement quand elle est active).
+    this.bones = new Set();
+    this.constraints = new Set();
   }
 
   get(slotName, name) {

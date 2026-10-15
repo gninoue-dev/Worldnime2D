@@ -3,7 +3,7 @@
 import { Bone, INHERIT, DEFAULT_BONE_COLOR } from './bone.js';
 import { Slot } from './slot.js';
 import { Skin } from './skin.js';
-import { Animation, EventData } from './animation.js';
+import { Animation, EventData, deformKey } from './animation.js';
 import { MeshAttachment } from './mesh.js';
 import { CONSTRAINT_CLASSES } from './constraints.js';
 
@@ -34,6 +34,11 @@ export class Skeleton {
     this.time = 0;
     this.referenceScale = 100;
     this.skins = [new Skin('default')];
+    // Skins actives (en plus de « default ») : une pièce jointe se cherche dans les skins actives
+    // (la dernière l'emporte), puis dans « default ».
+    this.activeSkins = [];
+    // Skin où l'on ajoute les nouvelles pièces jointes (null : « default »).
+    this.editSkinName = null;
     this.addBone(ROOT_NAME, null);
   }
 
@@ -77,6 +82,7 @@ export class Skeleton {
     for (const slot of this.slots.filter((sl) => doomed.has(sl.bone))) this.removeSlot(slot);
     for (const anim of this.animations) for (const b of doomed) anim.removeBone(b.name);
     const names = new Set([...doomed].map((b) => b.name));
+    for (const skin of this.skins) for (const n of names) skin.bones.delete(n);
     for (const c of [...this.constraints]) {
       c.bones = c.bones.filter((n) => !names.has(n));
       if (c.bones.length === 0 || (c.kind !== 'path' && c.kind !== 'physics' && names.has(c.target))) this.removeConstraint(c);
@@ -96,12 +102,19 @@ export class Skeleton {
     return out;
   }
 
+  renameBoneInSkins(oldName, newName) {
+    for (const skin of this.skins) {
+      if (skin.bones.delete(oldName)) skin.bones.add(newName);
+    }
+  }
+
   renameBone(bone, newName) {
     const name = newName.trim();
     if (!name) throw new Error('Le nom ne peut pas être vide.');
     if (name === bone.name) return;
     if (this.findBone(name)) throw new Error(`Un os s'appelle déjà « ${name} ».`);
     for (const anim of this.animations) anim.renameBone(bone.name, name);
+    this.renameBoneInSkins(bone.name, name);
     for (const m of this.meshes()) for (const list of m.att.weights ?? []) for (const e of list) if (e.bone === bone.name) e.bone = name;
     for (const c of this.constraints) {
       c.bones = c.bones.map((n) => (n === bone.name ? name : n));
@@ -166,11 +179,13 @@ export class Skeleton {
   // this.time), 'reset' (repart de zéro) ou 'none' (sans physique).
   updateWorldTransform(physics = 'pose') {
     if (!this.posed) this.setToSetupPose();
+    this.updateActive();
     for (const bone of this.bones) {
       bone.resetApplied();
       bone.updateWorldTransform();
     }
     for (const c of this.sortedConstraints()) {
+      if (c.active === false) continue;
       for (const b of c.apply(this, physics)) this.updateDescendants(b);
     }
   }
@@ -210,6 +225,7 @@ export class Skeleton {
 
   removeConstraint(c) {
     this.constraints = this.constraints.filter((x) => x !== c);
+    for (const skin of this.skins) skin.constraints.delete(c.name);
     for (const anim of this.animations) anim.removeConstraint(c.kind, c.name);
   }
 
@@ -219,6 +235,7 @@ export class Skeleton {
     if (n === c.name) return;
     if (this.findConstraint(n)) throw new Error(`Une contrainte s'appelle déjà « ${n} ».`);
     for (const anim of this.animations) anim.renameConstraint(c.kind, c.name, n);
+    for (const skin of this.skins) if (skin.constraints.delete(c.name)) skin.constraints.add(n);
     c.name = n;
   }
 
@@ -264,6 +281,9 @@ export class Skeleton {
     for (const skin of this.skins) skin.removeSlot(slot.name);
     for (const anim of this.animations) anim.removeSlot(slot.name);
     for (const c of [...this.constraints]) if (c.kind === 'path' && c.target === slot.name) this.removeConstraint(c);
+    for (const skin of this.skins) {
+      for (const map of skin.attachments.values()) for (const a of map.values()) if (a.type === 'clipping' && a.end === slot.name) a.end = null;
+    }
   }
 
   renameSlot(slot, newName) {
@@ -274,6 +294,9 @@ export class Skeleton {
     for (const skin of this.skins) skin.renameSlot(slot.name, name);
     for (const anim of this.animations) anim.renameSlot(slot.name, name);
     for (const c of this.constraints) if (c.kind === 'path' && c.target === slot.name) c.target = name;
+    for (const skin of this.skins) {
+      for (const map of skin.attachments.values()) for (const a of map.values()) if (a.type === 'clipping' && a.end === slot.name) a.end = name;
+    }
     slot.name = name;
   }
 
@@ -308,10 +331,109 @@ export class Skeleton {
     return true;
   }
 
-  // --- Pièces jointes (skin par défaut) ---------------------------------------------
+  // --- Skins ------------------------------------------------------------------------------
+
+  findSkin(name) {
+    return this.skins.find((s) => s.name === name) ?? null;
+  }
+
+  uniqueSkinName(base = 'skin') {
+    if (!this.findSkin(base)) return base;
+    let i = 2;
+    while (this.findSkin(`${base}${i}`)) i++;
+    return `${base}${i}`;
+  }
+
+  // Skin où l'on ajoute les nouvelles pièces jointes.
+  get editSkin() {
+    return this.findSkin(this.editSkinName) ?? this.defaultSkin;
+  }
+
+  // Ordre de recherche : skins actives (la dernière d'abord), puis « default ».
+  lookupSkins() {
+    const list = this.activeSkins.map((n) => this.findSkin(n)).filter(Boolean).reverse();
+    list.push(this.defaultSkin);
+    return list;
+  }
+
+  addSkin(name) {
+    const n = name.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (this.findSkin(n)) throw new Error(`Une skin s'appelle déjà « ${n} ».`);
+    const skin = new Skin(n);
+    this.skins.push(skin);
+    return skin;
+  }
+
+  removeSkin(skin) {
+    if (skin === this.defaultSkin) throw new Error('La skin « default » ne peut pas être supprimée.');
+    this.skins = this.skins.filter((s) => s !== skin);
+    this.activeSkins = this.activeSkins.filter((n) => n !== skin.name);
+    if (this.editSkinName === skin.name) this.editSkinName = null;
+    for (const anim of this.animations) anim.remapDeform(([sk, slot, att]) => (sk === skin.name ? null : [sk, slot, att]));
+  }
+
+  renameSkin(skin, newName) {
+    const n = newName.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (skin === this.defaultSkin) throw new Error('La skin « default » ne peut pas être renommée.');
+    if (n === skin.name) return;
+    if (this.findSkin(n)) throw new Error(`Une skin s'appelle déjà « ${n} ».`);
+    const old = skin.name;
+    for (const anim of this.animations) anim.remapDeform(([sk, slot, att]) => [sk === old ? n : sk, slot, att]);
+    this.activeSkins = this.activeSkins.map((x) => (x === old ? n : x));
+    if (this.editSkinName === old) this.editSkinName = n;
+    skin.name = n;
+  }
+
+  // Skin qui contient cet objet pièce jointe.
+  skinOf(slot, att) {
+    for (const skin of this.skins) for (const a of skin.attachmentsOf(slot.name).values()) if (a === att) return skin;
+    return null;
+  }
+
+  // Pièces jointes visibles pour un slot (skins actives + default) : Map nom → { att, skin }.
+  attachmentsOf(slot) {
+    const out = new Map();
+    for (const skin of [...this.lookupSkins()].reverse()) {
+      for (const [name, att] of skin.attachmentsOf(slot.name)) out.set(name, { att, skin });
+    }
+    return out;
+  }
+
+  // Os et contraintes réservés à une skin : actifs seulement si l'une de leurs skins est active.
+  updateActive() {
+    const active = new Set(['default', ...this.activeSkins]);
+    const requiredBones = new Map();
+    const requiredConstraints = new Map();
+    for (const skin of this.skins) {
+      for (const b of skin.bones) requiredBones.set(b, (requiredBones.get(b) ?? false) || active.has(skin.name));
+      for (const c of skin.constraints) requiredConstraints.set(c, (requiredConstraints.get(c) ?? false) || active.has(skin.name));
+    }
+    for (const bone of this.bones) {
+      bone.active = (!requiredBones.has(bone.name) || requiredBones.get(bone.name)) && (!bone.parent || bone.parent.active);
+    }
+    for (const c of this.constraints) {
+      c.active = (!requiredConstraints.has(c.name) || requiredConstraints.get(c.name))
+        && c.bones.every((n) => this.findBone(n)?.active !== false);
+    }
+  }
+
+  // --- Pièces jointes (selon les skins actives) -------------------------------------------
 
   getAttachment(slot, name) {
-    return this.defaultSkin.get(slot.name, name);
+    for (const skin of this.lookupSkins()) {
+      const a = skin.get(slot.name, name);
+      if (a) return a;
+    }
+    return null;
+  }
+
+  // Remplace une pièce jointe par une autre (même nom), dans la skin qui la contient.
+  replaceAttachment(slot, name, att) {
+    const old = this.getAttachment(slot, name);
+    const skin = (old && this.skinOf(slot, old)) ?? this.editSkin;
+    skin.set(slot.name, name, att);
   }
 
   // Pièce jointe visible dans la pose de base.
@@ -319,45 +441,57 @@ export class Skeleton {
     return slot.attachment ? this.getAttachment(slot, slot.attachment) : null;
   }
 
-  addAttachment(slot, attachment) {
-    if (this.getAttachment(slot, attachment.name)) {
-      throw new Error(`Le slot « ${slot.name} » a déjà une pièce jointe « ${attachment.name} ».`);
+  // Ajoute dans la skin d'édition (ou celle donnée). Le même nom peut exister dans plusieurs skins :
+  // c'est un emplacement de skin (chaque skin fournit sa version).
+  addAttachment(slot, attachment, skin = this.editSkin) {
+    if (skin.get(slot.name, attachment.name)) {
+      throw new Error(`Le slot « ${slot.name} » a déjà une pièce jointe « ${attachment.name} » dans la skin « ${skin.name} ».`);
     }
-    this.defaultSkin.set(slot.name, attachment.name, attachment);
+    skin.set(slot.name, attachment.name, attachment);
     return attachment;
   }
 
   removeAttachment(slot, name) {
     const att = this.getAttachment(slot, name);
+    if (!att) return;
+    const skin = this.skinOf(slot, att);
     // Les maillages liés à celui-ci deviennent indépendants (copie de sa géométrie).
     if (att instanceof MeshAttachment && !att.parent) {
-      for (const other of this.defaultSkin.attachmentsOf(slot.name).values()) {
+      for (const other of skin.attachmentsOf(slot.name).values()) {
         if (other.parent !== name) continue;
         const copy = att.copy(other.name);
         Object.assign(other, { vertices: copy.vertices, weights: copy.weights, uvs: copy.uvs, triangles: copy.triangles, hull: copy.hull, edges: copy.edges, parent: null });
       }
     }
-    this.defaultSkin.remove(slot.name, name);
-    if (slot.attachment === name) slot.attachment = null;
-    for (const anim of this.animations) anim.removeDeform(slot.name, name);
+    skin.remove(slot.name, name);
+    if (slot.attachment === name && !this.getAttachment(slot, name)) slot.attachment = null;
+    for (const anim of this.animations) {
+      anim.remapDeform(([s, sl, a]) => (s === skin.name && sl === slot.name && a === name ? null : [s, sl, a]));
+    }
   }
 
+  // Renomme l'emplacement dans toutes les skins (les versions de chaque skin gardent leur image).
   renameAttachment(slot, oldName, newName) {
     const name = newName.trim();
     if (!name) throw new Error('Le nom ne peut pas être vide.');
     if (name === oldName) return;
-    if (this.getAttachment(slot, name)) throw new Error(`Le slot a déjà une pièce jointe « ${name} ».`);
-    const att = this.getAttachment(slot, oldName);
-    // Le chemin de l'image ne change pas quand on renomme.
-    if (att.path === null) att.path = oldName;
-    if (att.path === name) att.path = null;
-    this.defaultSkin.remove(slot.name, oldName);
-    att.name = name;
-    this.defaultSkin.set(slot.name, name, att);
+    if (this.skins.some((s) => s.get(slot.name, name))) throw new Error(`Le slot a déjà une pièce jointe « ${name} ».`);
+    for (const skin of this.skins) {
+      const att = skin.get(slot.name, oldName);
+      if (!att) continue;
+      // Le chemin de l'image ne change pas quand on renomme.
+      if ('path' in att && att.type !== 'path') {
+        if (att.path === null) att.path = oldName;
+        if (att.path === name) att.path = null;
+      }
+      skin.remove(slot.name, oldName);
+      att.name = name;
+      skin.set(slot.name, name, att);
+      // Les maillages liés à celui-ci suivent.
+      for (const other of skin.attachmentsOf(slot.name).values()) if (other.parent === oldName) other.parent = name;
+    }
     if (slot.attachment === oldName) slot.attachment = name;
     for (const anim of this.animations) anim.renameAttachment(slot.name, oldName, name);
-    // Les maillages liés à celui-ci suivent.
-    for (const other of this.defaultSkin.attachmentsOf(slot.name).values()) if (other.parent === oldName) other.parent = name;
   }
 
   // --- Maillages ------------------------------------------------------------------------
@@ -374,8 +508,15 @@ export class Skeleton {
   // Maillage qui porte la géométrie (le parent d'un maillage lié).
   meshSource(slot, att) {
     if (!(att instanceof MeshAttachment) || !att.parent) return att;
-    const p = this.getAttachment(slot, att.parent);
+    // Le parent se cherche d'abord dans la skin du maillage lié.
+    const p = this.skinOf(slot, att)?.get(slot.name, att.parent) ?? this.getAttachment(slot, att.parent);
     return p instanceof MeshAttachment && !p.parent ? p : att;
+  }
+
+  // Clé de la timeline de déformation qui s'applique à cette pièce jointe (skin, slot, nom).
+  deformKeyFor(slot, att) {
+    const target = att.parent && att.timelines ? this.meshSource(slot, att) : att;
+    return deformKey(slot.name, target.name, this.skinOf(slot, target)?.name ?? 'default');
   }
 
   // Nom de la pièce jointe dont la déformation s'applique (le parent d'un maillage lié qui suit ses timelines).
@@ -387,7 +528,7 @@ export class Skeleton {
   attachmentVertices(slot, att) {
     if (!(att instanceof MeshAttachment)) return att.worldVertices(slot.bone);
     const src = this.meshSource(slot, att);
-    const deform = slot.pose.deformFor === this.deformName(slot, att) ? slot.pose.deform : null;
+    const deform = slot.pose.deformFor === this.deformKeyFor(slot, att) ? slot.pose.deform : null;
     const valid = deform && deform.length === src.deformLength ? deform : null;
     return MeshAttachment.worldVertices(src, slot.bone, this, valid);
   }

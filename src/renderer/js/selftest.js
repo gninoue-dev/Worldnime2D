@@ -146,6 +146,7 @@ export async function runSelftest({ editor, viewport, api, ...extra }) {
     if (extra.info?.selftestOra) await testV03({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     if (extra.info?.selftestOra) await testV05({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     await testV06({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
+    if (extra.info?.selftestOra) await testV07({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
   } catch (err) {
     check('exception', false, err.stack || err.message);
   }
@@ -865,4 +866,102 @@ async function testV06({ editor, viewport, api, check, near, dragWorld, library,
   check('contraintes enregistrées et relues', again.constraints.length === 3 && again.findConstraint(ik.name).bendPositive === false);
   await frame();
   await api.selftestCapture('18-contraintes');
+}
+
+// --- v0.7 : skins et pièces jointes spéciales -----------------------------------------------------
+
+async function testV07({ editor, viewport, api, check, near, pointer, dragWorld, library, importLayers, info, setTab }) {
+  const sk = () => editor.skeleton;
+  const { Skeleton } = await import('./model/skeleton.js');
+  editor.setMode('setup');
+  editor.reset(new Skeleton());
+  await waitFor(() => library.dir === null);
+  await importLayers(info.selftestOra, `${info.selftestDir}/images_skins`);
+  viewport.frameAll();
+  const tete = () => sk().findSlot('tete');
+  const head = sk().currentAttachment(tete());
+  const probe = { x: head.x + head.width * 0.15, y: head.y + head.height * 0.1 };
+  const colorOf = () => pixelAt(viewport, probe.x, probe.y);
+  const before = colorOf();
+
+  // 1. Nouvelle skin par le panneau Skins.
+  setTab('skins');
+  await frame();
+  document.querySelector('#skins .anim-head button').click();
+  check('skins : nouvelle skin créée et sélectionnée', sk().skins.length === 2 && sk().editSkin.name === 'skin' && sk().activeSkins.includes('skin'));
+
+  // 2. Version de la tête pour cette skin (même nom, autre image).
+  setTab('tree');
+  editor.selectAttachment(tete(), 'tete');
+  await frame();
+  clickButton('Créer la version de la skin');
+  const v = sk().findSkin('skin').get('tete', 'tete');
+  check('skins : version créée dans la skin', Boolean(v) && sk().currentAttachment(tete()) === v);
+  editor.apply(() => {
+    v.path = 'torse';
+  });
+  await frame();
+  const skinned = colorOf();
+  check('skins : la skin change l\'image affichée', Math.abs(skinned[0] - before[0]) + Math.abs(skinned[1] - before[1]) + Math.abs(skinned[2] - before[2]) > 40, `${before} → ${skinned}`);
+  setTab('skins');
+  await frame();
+  const box = [...document.querySelectorAll('#skins input[type="checkbox"]')].find((c) => !c.disabled);
+  box.click();
+  await frame();
+  const off = colorOf();
+  check('skins : décocher la skin revient à « default »', Math.abs(off[0] - before[0]) + Math.abs(off[1] - before[1]) + Math.abs(off[2] - before[2]) < 10, `${off}`);
+  setTab('tree');
+
+  // 3. Découpe : placée au fond, elle masque tout ce qui est dessiné après, hors de son polygone.
+  editor.select(sk().root);
+  await frame();
+  clickButton('Découpe (clipping)');
+  const clipSlot = editor.selectedSlot;
+  check('découpe : créée', editor.attachment?.type === 'clipping');
+  editor.apply(() => sk().moveSlot(clipSlot, 0));
+  await frame();
+  const clipped = colorOf();
+  const bg = (() => {
+    viewport.attachments.visible = false;
+    viewport.render();
+    const c = colorOf();
+    viewport.attachments.visible = true;
+    viewport.render();
+    return c;
+  })();
+  check(`découpe : la tête (hors du polygone) est masquée (${viewport.rendererName})`, Math.abs(clipped[0] - bg[0]) + Math.abs(clipped[1] - bg[1]) + Math.abs(clipped[2] - bg[2]) < 12, `${clipped} vs fond ${bg}`);
+  await frame();
+  await api.selftestCapture('19-decoupe');
+  editor.apply(() => sk().removeSlot(clipSlot));
+
+  // 4. Boîte de collision : clic sur une arête = nouveau sommet.
+  editor.select(sk().root);
+  await frame();
+  clickButton('Boîte de collision');
+  const bb = editor.attachment;
+  check('collision : créée (4 sommets)', bb?.type === 'boundingbox' && bb.vertices.length === 4);
+  const bv = bb.worldVertices(editor.selectedSlot.bone);
+  editor.setTool('select');
+  const mx = (bv[0] + bv[2]) / 2;
+  const my = (bv[1] + bv[3]) / 2;
+  await dragWorld([mx, my], [mx, my - 30]);
+  check('collision : clic sur une arête ajoute un sommet', bb.vertices.length === 5);
+
+  // 5. Point : déplacé à la souris.
+  editor.select(sk().root);
+  await frame();
+  clickButton('Point sur cet os');
+  const pt = editor.attachment;
+  const pw = pt.world(editor.selectedSlot.bone);
+  editor.setTool('translate');
+  await dragWorld([pw.x, pw.y], [pw.x + 40, pw.y + 15]);
+  check('point : déplacé', near(pt.x, 40, 0.5) && near(pt.y, 15, 0.5), `${pt.x}, ${pt.y}`);
+  await frame();
+  await api.selftestCapture('20-speciaux');
+
+  // 6. Enregistrement et relecture.
+  const { parseProject } = await import('./model/format.js');
+  const again = parseProject(editor.toText());
+  check('skins et pièces spéciales enregistrées et relues', again.findSkin('skin')?.get('tete', 'tete')
+    && [...again.attachmentsOf(again.findSlot(bb.name)).values()][0].att.type === 'boundingbox');
 }

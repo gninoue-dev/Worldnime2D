@@ -14,6 +14,8 @@ import { MeshInteraction } from './meshinteraction.js';
 import { MeshAttachment } from '../model/mesh.js';
 import { meshUVAt } from '../model/geometry.js';
 import { PathAttachment, bezierPoint } from '../model/path.js';
+import { BoundingBoxAttachment, ClippingAttachment, PointAttachment, isPolygonAttachment } from '../model/special.js';
+import { pointInPolygon, distToSegmentPoint } from '../model/geometry.js';
 import { parseProject, serializeProject } from '../model/format.js';
 
 // Pelure d'oignon : images fantômes avant (rouge) et après (vert) l'instant courant.
@@ -404,6 +406,7 @@ export class Viewport {
       if (att) this.strokeAttachment(g, this.hover.slot, att, COLORS.hover, 1);
     }
     this.drawPaths(g);
+    this.drawSpecials(g);
     this.drawConstraints(g);
     if (this.mesh.active()) this.mesh.draw(g);
     else if (editor.selectedSlot) {
@@ -457,6 +460,73 @@ export class Viewport {
         g.rect(p.x - 4.5, p.y - 4.5, 9, 9).fill({ color: 0xff9800 }).stroke({ width: 1, color: 0x111111 });
       }
     }
+  }
+
+  // Boîtes de collision (vert), découpes (rouge), points (réticule et direction).
+  drawSpecials(g) {
+    const editor = this.editor;
+    const sk = editor.skeleton;
+    for (const slot of sk.drawOrder) {
+      if (slot.bone.active === false) continue;
+      const att = sk.currentAttachment(slot);
+      const selected = editor.attachment === att && att;
+      if (isPolygonAttachment(att)) {
+        const v = att.worldVertices(slot.bone);
+        const pts = [];
+        for (let i = 0; i < v.length; i += 2) {
+          const s = this.toScreen(v[i], v[i + 1]);
+          pts.push(s.x, s.y);
+        }
+        const color = parseInt(att.color.slice(1, 7), 16);
+        g.poly(pts).fill({ color, alpha: 0.08 }).stroke({ width: selected ? 2.5 : 1.5, color: selected ? COLORS.selected : color });
+        if (selected && !editor.animating) {
+          for (let i = 0; i < pts.length; i += 2) g.rect(pts[i] - 4, pts[i + 1] - 4, 8, 8).fill({ color }).stroke({ width: 1, color: 0x111111 });
+        }
+      } else if (att instanceof PointAttachment) {
+        const w = att.world(slot.bone);
+        const s = this.toScreen(w.x, w.y);
+        const color = selected ? COLORS.selected : parseInt(att.color.slice(1, 7), 16);
+        const r = (w.rotation * Math.PI) / 180;
+        g.circle(s.x, s.y, 6).stroke({ width: 1.5, color });
+        g.moveTo(s.x - 9, s.y).lineTo(s.x + 9, s.y).moveTo(s.x, s.y - 9).lineTo(s.x, s.y + 9).stroke({ width: 1, color });
+        g.moveTo(s.x, s.y).lineTo(s.x + Math.cos(r) * 22, s.y - Math.sin(r) * 22).stroke({ width: 2, color });
+      }
+    }
+  }
+
+  // Sommet du polygone sélectionné (boîte de collision ou découpe) sous le pointeur, ou -1.
+  polygonVertexAt(sx, sy) {
+    const editor = this.editor;
+    const att = editor.attachment;
+    if (editor.animating || !isPolygonAttachment(att)) return -1;
+    const v = att.worldVertices(editor.selectedSlot.bone);
+    let best = -1;
+    let bd = 8;
+    for (let i = 0; i < v.length / 2; i++) {
+      const s = this.toScreen(v[i * 2], v[i * 2 + 1]);
+      const d = Math.hypot(s.x - sx, s.y - sy);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  // Arête du polygone sélectionné sous le pointeur (indice du premier sommet), ou -1.
+  polygonEdgeAt(sx, sy) {
+    const editor = this.editor;
+    const att = editor.attachment;
+    if (editor.animating || !isPolygonAttachment(att)) return -1;
+    const v = att.worldVertices(editor.selectedSlot.bone);
+    const n = v.length / 2;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const a = this.toScreen(v[i * 2], v[i * 2 + 1]);
+      const b = this.toScreen(v[j * 2], v[j * 2 + 1]);
+      if (distToSegmentPoint(sx, sy, [a.x, a.y], [b.x, b.y]) < 6) return i;
+    }
+    return -1;
   }
 
   // Repères des contraintes : lien IK vers la cible, os physiques.
@@ -560,6 +630,18 @@ export class Viewport {
         if (this.library.get(att.imagePath) && this.library.alphaAt(att.imagePath, uv[0], uv[1]) < ALPHA_HIT) continue;
         return { kind: 'attachment', slot, name: att.name };
       }
+      if (isPolygonAttachment(att)) {
+        if (pointInPolygon(att.vertices.map(([x, y]) => {
+          const p2 = slot.bone.localToWorld(x, y);
+          return [p2.x, p2.y];
+        }), w.x, w.y)) return { kind: 'attachment', slot, name: att.name };
+        continue;
+      }
+      if (att instanceof PointAttachment) {
+        const pw = att.world(slot.bone);
+        if (Math.hypot(pw.x - w.x, pw.y - w.y) * this.zoom < 9) return { kind: 'attachment', slot, name: att.name };
+        continue;
+      }
       if (att instanceof PathAttachment) {
         // Un chemin se sélectionne en cliquant près de sa courbe.
         const tol = 6 / this.zoom;
@@ -583,8 +665,14 @@ export class Viewport {
     return null;
   }
 
-  // Les os passent avant les images, comme dans les éditeurs du genre.
+  // Les os passent avant les images, comme dans les éditeurs du genre,
+  // sauf si l'on clique sur la pièce jointe déjà sélectionnée.
   hitTest(sx, sy) {
+    const ed = this.editor;
+    if (ed.selectionKind === 'attachment') {
+      const att = this.hitAttachment(sx, sy);
+      if (att && att.slot === ed.selectedSlot && att.name === ed.selectedAttachment) return att;
+    }
     const bone = this.hitBone(sx, sy);
     if (bone) return { kind: 'bone', bone };
     return this.hitAttachment(sx, sy);
@@ -670,6 +758,28 @@ export class Viewport {
       return;
     }
 
+    // Polygone sélectionné (boîte de collision, découpe) : glisser, ajouter ou supprimer des sommets.
+    const polyV = this.polygonVertexAt(p.x, p.y);
+    const polyE = polyV < 0 ? this.polygonEdgeAt(p.x, p.y) : -1;
+    if (polyV >= 0 || polyE >= 0) {
+      const att = editor.attachment;
+      const bone = editor.selectedSlot.bone;
+      if (polyV >= 0 && e.altKey) {
+        if (att.vertices.length <= 3) this.notify?.('Un polygone garde au moins 3 sommets.');
+        else editor.apply(() => att.vertices.splice(polyV, 1));
+        return;
+      }
+      editor.begin();
+      let index = polyV;
+      if (index < 0) {
+        const l = bone.worldToLocal(w.x, w.y);
+        index = polyE + 1;
+        att.vertices.splice(index, 0, [l.x, l.y]);
+      }
+      this.drag = { kind: 'polyvertex', att, bone, index };
+      return;
+    }
+
     // Chemin sélectionné : glisser un point (avec ses poignées) ou une poignée.
     const pv = this.pathVertexAt(p.x, p.y);
     if (pv >= 0) {
@@ -705,7 +815,8 @@ export class Viewport {
     }
     const target = editor.selectionKind === 'attachment'
       ? (editor.attachment instanceof MeshAttachment ? meshTarget(editor.selectedSlot, editor.attachment)
-        : attachmentTarget(editor.selectedSlot, editor.attachment))
+        : editor.attachment instanceof PointAttachment ? pointTarget(editor.selectedSlot, editor.attachment)
+          : attachmentTarget(editor.selectedSlot, editor.attachment))
       : editor.selectionKind === 'bone' ? boneTarget(editor.selected, editor.animating) : null;
     if (!target) return;
     if (editor.tool === TOOLS.shear && !target.canShear) return;
@@ -735,6 +846,12 @@ export class Viewport {
     }
     if (d?.kind === 'pathvertex') {
       this.movePathVertex(d, w, e);
+      return;
+    }
+    if (d?.kind === 'polyvertex') {
+      const l = d.bone.worldToLocal(w.x, w.y);
+      d.att.vertices[d.index] = [l.x, l.y];
+      this.editor.emit('drag');
       return;
     }
     if (!d && this.editor.meshTool && this.mesh.active()) {
@@ -841,7 +958,7 @@ export class Viewport {
       this.mesh.up();
       return;
     }
-    if (d.kind === 'pathvertex') {
+    if (d.kind === 'pathvertex' || d.kind === 'polyvertex') {
       this.editor.commit();
       this.editor.emit('edit');
       return;
@@ -926,7 +1043,7 @@ export class Viewport {
     if (!d) return;
     this.drag = null;
     if (d.kind === 'mesh') this.mesh.cancel();
-    else if (d.kind === 'pathvertex') this.editor.cancel();
+    else if (d.kind === 'pathvertex' || d.kind === 'polyvertex') this.editor.cancel();
     else if (d.kind !== 'pan' && d.kind !== 'create') this.editor.cancel();
     this.render();
   }
@@ -1016,6 +1133,31 @@ function meshTarget(slot, mesh) {
       st.scaleY = sy;
       apply();
     },
+    setShear: () => {},
+  };
+}
+
+// Point : position et rotation dans le repère de l'os.
+function pointTarget(slot, pt) {
+  const bone = slot.bone;
+  return {
+    canShear: false,
+    flip: determinantSign(bone),
+    frame: () => {
+      const w = pt.world(bone);
+      const r = (w.rotation * Math.PI) / 180;
+      return { x: w.x, y: w.y, ax: Math.cos(r), ay: Math.sin(r), bx: -Math.sin(r), by: Math.cos(r) };
+    },
+    save: () => ({ rotation: pt.rotation, scaleX: 1, scaleY: 1 }),
+    setRotation: (r) => {
+      pt.rotation = r;
+    },
+    setWorldPosition: (x, y) => {
+      const l = bone.worldToLocal(x, y);
+      pt.x = l.x;
+      pt.y = l.y;
+    },
+    setScale: () => {},
     setShear: () => {},
   };
 }

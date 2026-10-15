@@ -41,6 +41,8 @@ export class Bone {
     this.shearY = 0;
     this.inherit = INHERIT.normal;
     this.color = DEFAULT_BONE_COLOR;
+    // Faux si l'os est réservé à une skin qui n'est pas active.
+    this.active = true;
 
     // Pose courante : la pose de base, modifiée par les animations et les contraintes.
     // C'est elle qui sert au calcul de la matrice monde.

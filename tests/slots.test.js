@@ -134,3 +134,88 @@ test('couleurs', () => {
   assert.equal(joinAlpha('#336699', 0.5), '#33669980');
   assert.deepEqual(splitAlpha('#336699ff'), { rgb: '#336699', alpha: 1 });
 });
+
+test('skins : emplacements, skins combinées, os et contraintes réservés', async () => {
+  const { RegionAttachment: Region } = await import('../src/renderer/js/model/attachment.js');
+  const sk = new Skeleton();
+  const tete = sk.addBone('tete', sk.root);
+  const chapeau = sk.addBone('chapeau', tete);
+  const slot = sk.addSlot('tete', tete);
+  const base = new Region('visage');
+  base.path = 'visage_base';
+  sk.addAttachment(slot, base);
+  slot.attachment = 'visage';
+  const or = sk.addSkin('or');
+  const nuit = sk.addSkin('nuit');
+  const vOr = new Region('visage');
+  vOr.path = 'visage_or';
+  sk.addAttachment(slot, vOr, or);
+  sk.addAttachment(slot, new Region('casque'), nuit);
+  assert.equal(sk.getAttachment(slot, 'visage').path, 'visage_base');
+  sk.activeSkins = ['or'];
+  assert.equal(sk.getAttachment(slot, 'visage').path, 'visage_or');
+  assert.equal(sk.getAttachment(slot, 'casque'), null);
+  sk.activeSkins = ['or', 'nuit'];
+  assert.ok(sk.getAttachment(slot, 'casque'));
+  assert.deepEqual([...sk.attachmentsOf(slot).keys()].sort(), ['casque', 'visage']);
+  // Os réservé à « nuit ».
+  nuit.bones.add('chapeau');
+  const ik = sk.addConstraint('ik', 'ik_chapeau');
+  ik.bones = ['chapeau'];
+  ik.target = 'tete';
+  nuit.constraints.add('ik_chapeau');
+  sk.updateWorldTransform();
+  assert.equal(chapeau.active, true);
+  sk.activeSkins = ['or'];
+  sk.updateWorldTransform();
+  assert.equal(chapeau.active, false);
+  assert.equal(ik.active, false);
+  // Renommer l'emplacement : toutes les skins suivent.
+  sk.renameAttachment(slot, 'visage', 'tete_face');
+  assert.ok(sk.defaultSkin.get('tete', 'tete_face') && or.get('tete', 'tete_face'));
+  assert.equal(slot.attachment, 'tete_face');
+  // Enregistrement.
+  sk.editSkinName = 'or';
+  const text = projectToText(sk, { appVersion: 't' });
+  const sk2 = parseProject(text);
+  assert.equal(projectToText(sk2, { appVersion: 't' }), text);
+  assert.equal(sk2.editSkin.name, 'or');
+  assert.ok(sk2.findSkin('nuit').bones.has('chapeau'));
+  sk2.removeSkin(sk2.findSkin('or'));
+  assert.equal(sk2.editSkinName, null);
+});
+
+test('pièces jointes spéciales : collision, découpe, point', async () => {
+  const { BoundingBoxAttachment, ClippingAttachment, PointAttachment, squarePolygon } = await import('../src/renderer/js/model/special.js');
+  const sk = new Skeleton();
+  const b = sk.addBone('b', sk.root);
+  b.x = 10;
+  b.rotation = 90;
+  sk.updateWorldTransform();
+  const s1 = sk.addSlot('zone', b);
+  const box = new BoundingBoxAttachment('zone');
+  box.vertices = squarePolygon(20);
+  sk.addAttachment(s1, box);
+  const s2 = sk.addSlot('masque', b);
+  const clip = new ClippingAttachment('masque');
+  clip.vertices = squarePolygon(40);
+  clip.end = 'zone';
+  sk.addAttachment(s2, clip);
+  const s3 = sk.addSlot('canon', b);
+  const pt = new PointAttachment('canon');
+  pt.x = 5;
+  pt.rotation = 10;
+  sk.addAttachment(s3, pt);
+  const w = pt.world(b);
+  assert.ok(Math.abs(w.x - 10) < 1e-6 && Math.abs(w.y - 5) < 1e-6);
+  assert.ok(Math.abs(w.rotation - 100) < 1e-6);
+  const v = box.worldVertices(b);
+  assert.ok(Math.abs(v[0] - 20) < 1e-6 && Math.abs(v[1] + 10) < 1e-6);
+  sk.renameSlot(s1, 'zone_touche');
+  assert.equal(clip.end, 'zone_touche');
+  const text = projectToText(sk, { appVersion: 't' });
+  const sk2 = parseProject(text);
+  assert.equal(projectToText(sk2, { appVersion: 't' }), text);
+  sk.removeSlot(sk.findSlot('zone_touche'));
+  assert.equal(clip.end, null);
+});
