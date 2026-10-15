@@ -162,6 +162,8 @@ ipcMain.handle('app:info', () => ({
   selftestDir: SELFTEST_DIR,
   selftestOra: process.env.WN2D_SELFTEST_ORA || null,
   selftestPsd: process.env.WN2D_SELFTEST_PSD || null,
+  // Pour tester le mode de secours sans WebGL : WN2D_RENDERER=canvas.
+  renderer: process.env.WN2D_RENDERER || 'webgl',
 }));
 
 ipcMain.handle('app:pending-file', async () => {

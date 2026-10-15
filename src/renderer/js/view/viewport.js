@@ -61,7 +61,7 @@ export class Viewport {
     this.onDropImage = null;
   }
 
-  async init() {
+  async init(preference = 'webgl') {
     this.app = new Application();
     await this.app.init({
       resizeTo: this.host,
@@ -70,7 +70,10 @@ export class Viewport {
       autoDensity: true,
       resolution: window.devicePixelRatio || 1,
       preserveDrawingBuffer: true,
+      preference,
     });
+    // Le shader « deux couleurs » est écrit en GLSL : il ne sert qu'avec le rendu WebGL.
+    this.rendererName = this.app.renderer.name;
     this.host.appendChild(this.app.canvas);
     this.canvas = this.app.canvas;
     this.canvas.tabIndex = 0;
@@ -80,7 +83,7 @@ export class Viewport {
     this.referenceSprite = new Sprite();
     this.referenceSprite.anchor.set(0.5);
     this.referenceSprite.visible = false;
-    this.attachments = new AttachmentsView(this.library);
+    this.attachments = new AttachmentsView(this.library, this.rendererName === 'webgl');
     this.world.addChild(this.referenceSprite, this.attachments.container);
     this.bonesLayer = new Graphics();
     this.overlay = new Graphics();

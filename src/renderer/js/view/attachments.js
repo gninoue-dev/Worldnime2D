@@ -3,8 +3,12 @@
 // Chaque image est un Mesh PixiJS avec un shader « deux couleurs » :
 //   couleur finale = image × couleur claire + (1 − image) × couleur sombre
 // C'est la teinte sombre (« tint black ») : sans couleur sombre (noir), on retrouve la teinte classique.
+//
+// Sans WebGL (carte graphique sur liste noire, machine virtuelle…), PixiJS dessine en Canvas 2D,
+// qui ne connaît pas les shaders : on utilise alors des sprites. Teinte et opacité marchent,
+// mais pas la teinte sombre.
 
-import { Container, Graphics, Mesh, MeshGeometry, Shader, UniformGroup } from 'pixi.js';
+import { Container, Graphics, Matrix, Mesh, MeshGeometry, Shader, Sprite, UniformGroup } from 'pixi.js';
 import { RegionAttachment } from '../model/attachment.js';
 import { hexToRgba } from '../model/color.js';
 
@@ -43,12 +47,29 @@ void main() {
 const PIXI_BLEND = { normal: 'normal', additive: 'add', multiply: 'multiply', screen: 'screen' };
 
 export class AttachmentsView {
-  constructor(library) {
+  constructor(library, useShader) {
     this.library = library;
+    this.useShader = useShader;
     this.container = new Container();
     this.missing = new Graphics();
     this.pool = new Map();
     this.visible = true;
+    library.addEventListener('dispose', (e) => this.forget(e.detail));
+  }
+
+  // Oublie les éléments qui utilisent une texture sur le point d'être détruite.
+  forget(texture) {
+    for (const [name, item] of this.pool) {
+      if (item.texture !== texture) continue;
+      this.destroyItem(item);
+      this.pool.delete(name);
+    }
+  }
+
+  destroyItem(item) {
+    item.mesh.removeFromParent();
+    item.mesh.destroy();
+    item.shader?.destroy();
   }
 
   // Redessine toutes les images du squelette (coordonnées monde).
@@ -69,24 +90,13 @@ export class AttachmentsView {
         this.drawMissing(verts);
         continue;
       }
-      const item = this.item(slot.name, entry.texture);
       used.add(slot.name);
-      item.geometry.positions = verts;
-      item.geometry.getBuffer('aPosition').update();
-
       const [sr, sg, sb, sa] = hexToRgba(slot.color);
       const [ar, ag, ab, aa] = hexToRgba(att.color);
-      const light = item.uniforms.uniforms.uLight;
-      light[0] = sr * ar;
-      light[1] = sg * ag;
-      light[2] = sb * ab;
-      light[3] = sa * aa;
-      const dark = item.uniforms.uniforms.uDark;
-      const [dr, dg, db] = slot.dark ? hexToRgba(slot.dark) : [0, 0, 0];
-      dark[0] = dr;
-      dark[1] = dg;
-      dark[2] = db;
-      item.uniforms.update();
+      const light = [sr * ar, sg * ag, sb * ab, sa * aa];
+      const item = this.useShader
+        ? this.shaderItem(slot, entry.texture, verts, light)
+        : this.spriteItem(slot, entry.texture, verts, light);
       item.mesh.blendMode = PIXI_BLEND[slot.blend] ?? 'normal';
       this.container.addChild(item.mesh);
     }
@@ -94,13 +104,47 @@ export class AttachmentsView {
     // Libère les meshes des slots disparus.
     for (const [name, item] of this.pool) {
       if (!used.has(name) && !skeleton.findSlot(name)) {
-        item.mesh.destroy();
+        this.destroyItem(item);
         this.pool.delete(name);
       }
     }
   }
 
-  item(slotName, texture) {
+  shaderItem(slot, texture, verts, light) {
+    const item = this.meshItem(slot.name, texture);
+    item.geometry.positions = verts;
+    item.geometry.getBuffer('aPosition').update();
+    item.uniforms.uniforms.uLight.set(light);
+    const [dr, dg, db] = slot.dark ? hexToRgba(slot.dark) : [0, 0, 0];
+    item.uniforms.uniforms.uDark.set([dr, dg, db]);
+    item.uniforms.update();
+    return item;
+  }
+
+  // Mode de secours : un sprite placé par une matrice qui envoie les coins de la texture
+  // (en pixels, Y vers le bas) sur les coins de l'image dans le monde.
+  spriteItem(slot, texture, v, light) {
+    let item = this.pool.get(slot.name);
+    if (!item || item.texture !== texture) {
+      if (item) this.destroyItem(item);
+      item = { mesh: new Sprite(texture), texture };
+      this.pool.set(slot.name, item);
+    }
+    const w = texture.width;
+    const h = texture.height;
+    // Coins : 0 bas-gauche, 1 bas-droite, 2 haut-droite, 3 haut-gauche.
+    const m = new Matrix(
+      (v[4] - v[6]) / w, (v[5] - v[7]) / w,
+      (v[0] - v[6]) / h, (v[1] - v[7]) / h,
+      v[6], v[7],
+    );
+    item.mesh.setFromMatrix(m);
+    item.mesh.tint = (Math.round(light[0] * 255) << 16) | (Math.round(light[1] * 255) << 8) | Math.round(light[2] * 255);
+    item.mesh.alpha = light[3];
+    return item;
+  }
+
+  meshItem(slotName, texture) {
     let item = this.pool.get(slotName);
     if (!item) {
       const geometry = new MeshGeometry({

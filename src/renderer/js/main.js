@@ -54,6 +54,7 @@ async function start() {
       `${editor.skeleton.bones.length} os · ${editor.skeleton.slots.length} slots`,
       s.hover ? `survol : ${s.hover}` : '',
       `outil : ${TOOL_INFO[editor.tool].label}`,
+      `rendu : ${viewport.rendererName === 'webgl' ? 'WebGL' : `${viewport.rendererName} (secours)`}`,
     ];
     for (const p of parts) {
       const span = document.createElement('span');
@@ -66,7 +67,10 @@ async function start() {
     ver.textContent = `v${info.version}`;
     statusEl.append(grow, ver);
   });
-  await viewport.init();
+  await viewport.init(info.renderer);
+  if (viewport.rendererName !== 'webgl') {
+    notify('Accélération graphique (WebGL) indisponible : aperçu simplifié, la teinte sombre ne s\'affiche pas.', 'info');
+  }
 
   // --- Chemins du projet (dossier d'images, image de référence) ------------------------
   // Dans le fichier, les chemins sont relatifs au .wn2d ; ici on garde les chemins absolus.

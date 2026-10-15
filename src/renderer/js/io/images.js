@@ -31,8 +31,14 @@ export class ImageLibrary extends EventTarget {
   }
 
   clear() {
-    for (const e of this.entries.values()) disposeEntry(e);
+    for (const e of this.entries.values()) this.dispose(e);
     this.entries.clear();
+  }
+
+  // Prévient la vue avant de détruire une texture, pour qu'elle cesse de l'utiliser.
+  dispose(e) {
+    if (e.texture) this.dispatchEvent(new CustomEvent('dispose', { detail: e.texture }));
+    disposeEntry(e);
   }
 
   // Recharge les images ajoutées ou modifiées depuis la dernière fois.
@@ -73,7 +79,7 @@ export class ImageLibrary extends EventTarget {
           disposeEntry(entry);
           return;
         }
-        if (old) disposeEntry(old);
+        if (old) this.dispose(old);
         this.entries.set(f.path, entry);
       } catch (err) {
         console.warn(`Image illisible : ${f.file}`, err);
@@ -81,7 +87,7 @@ export class ImageLibrary extends EventTarget {
     }
     for (const [path, e] of this.entries) {
       if (!seen.has(path)) {
-        disposeEntry(e);
+        this.dispose(e);
         this.entries.delete(path);
       }
     }

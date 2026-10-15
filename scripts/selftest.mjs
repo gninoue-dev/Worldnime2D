@@ -9,6 +9,8 @@ const out = resolve(process.argv[2] || 'selftest-output');
 rmSync(out, { recursive: true, force: true });
 const args = ['.'];
 if (process.platform === 'linux') args.push('--no-sandbox');
+// Options Chromium supplémentaires, par ex. pour autoriser le WebGL logiciel en intégration continue.
+if (process.env.WN2D_ELECTRON_ARGS) args.push(...process.env.WN2D_ELECTRON_ARGS.split(' ').filter(Boolean));
 const ora = resolve(process.env.WN2D_SELFTEST_ORA || 'tests/fixtures/personnage_test.ora');
 spawnSync(electron, args, { stdio: 'inherit', env: { ...process.env, WN2D_SELFTEST: out, WN2D_SELFTEST_ORA: ora, WN2D_SELFTEST_PSD: resolve('tests/fixtures/personnage_test.psd') }, timeout: 120000 });
 

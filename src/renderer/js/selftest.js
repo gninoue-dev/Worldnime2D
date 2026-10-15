@@ -241,7 +241,11 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
   });
   await frame();
   const dark = pixelAt(viewport, probe.x, probe.y);
-  check('teinte sombre appliquée', dark[1] >= before[1], `${before} → ${dark}`);
+  if (viewport.rendererName === 'webgl') {
+    check('teinte sombre appliquée (WebGL)', dark[1] > before[1] + 20, `${before} → ${dark}`);
+  } else {
+    check(`mode de secours (${viewport.rendererName}) : la teinte sombre est ignorée sans erreur`, dark[1] === before[1], `${before} → ${dark}`);
+  }
   editor.apply(() => {
     const s = sk().findSlot('tete');
     s.dark = null;

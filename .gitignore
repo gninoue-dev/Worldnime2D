@@ -3,3 +3,4 @@ dist/
 release/
 selftest-output/
 *.tmp
+selftest-output-webgl/

@@ -21,14 +21,20 @@ jobs:
       - run: npm ci
       - name: Tests du modèle
         run: npm test
-      - name: Test automatique de l'interface
+      - name: Test automatique de l'interface (rendu par défaut de la machine)
         run: xvfb-run --auto-servernum npm run selftest
+      - name: Test automatique de l'interface (WebGL logiciel, shader deux couleurs)
+        env:
+          WN2D_ELECTRON_ARGS: --ignore-gpu-blocklist --enable-unsafe-swiftshader
+        run: xvfb-run --auto-servernum node scripts/selftest.mjs selftest-output-webgl
       - name: Captures du test automatique
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: captures-selftest
-          path: selftest-output/
+          path: |
+            selftest-output/
+            selftest-output-webgl/
 
   installeurs:
     needs: tests
