@@ -9,6 +9,7 @@
 
 import { BONE_TIMELINES, SLOT_TIMELINES, TIMELINE_LABELS, TIME_EPSILON } from '../model/animation.js';
 import { CURVE_PRESETS, isBezier } from '../model/curve.js';
+import { GraphView } from './graph.js';
 
 const NAME_W = 190;
 const RULER_H = 22;
@@ -40,6 +41,9 @@ export class TimelinePanel {
     this.scrollY = 0;
     this.expanded = new Set();
     this.drag = null;
+    // Vue « keys » (dopesheet) ou « graph » (éditeur de courbes).
+    this.view = 'keys';
+    this.graph = new GraphView(this);
     this.build();
     editor.addEventListener('change', (e) => {
       if (['time', 'drag'].includes(e.detail.reason)) {
@@ -134,6 +138,7 @@ export class TimelinePanel {
       ed.emit('onion');
     }, 'tl-toggle');
     btn('◆ Clé', 'Poser une clé de rotation, position et échelle sur l\'os sélectionné (K)', () => this.keySelected());
+    this.graphBtn = btn('∿ Courbes', 'Basculer entre la vue des clés et l\'éditeur de courbes (G)', () => this.toggleView(), 'tl-toggle');
     sep();
     this.curveSelect = labelled('Courbe ', document.createElement('select'));
     this.curveSelect.title = 'Courbe des clés sélectionnées (vers la clé suivante)';
@@ -181,6 +186,12 @@ export class TimelinePanel {
     const keys = ed.selectedKeys.filter((e) => e.key.curve !== undefined || e.type !== 'attachment');
     this.curveSelect.disabled = keys.length === 0;
     this.curveSelect.value = keys.length ? curveId(keys[0].key.curve) : '';
+  }
+
+  toggleView() {
+    this.view = this.view === 'keys' ? 'graph' : 'keys';
+    this.graphBtn.classList.toggle('on', this.view === 'graph');
+    this.draw();
   }
 
   jumpKey(dir) {
@@ -331,6 +342,17 @@ export class TimelinePanel {
       if (x1 > x0) ctx.fillRect(x0, 0, x1 - x0, h);
     }
 
+    if (this.view === 'graph') {
+      ctx.save();
+      this.graph.draw(ctx, w, h, NAME_W, RULER_H, TYPE_COLORS);
+      ctx.restore();
+    } else this.drawRows(ctx, w, h, rows, ed);
+
+    this.drawRulerAndHead(ctx, w, h, ed, anim, fps, duration, endX);
+  }
+
+  drawRows(ctx, w, h, rows, ed) {
+    const fps = ed.fps;
     // Lignes.
     ctx.save();
     ctx.beginPath();
@@ -363,7 +385,7 @@ export class TimelinePanel {
     ctx.rect(NAME_W, RULER_H, w - NAME_W, h - RULER_H);
     ctx.clip();
     const step = this.ppf >= 8 ? 1 : this.ppf >= 4 ? 5 : 10;
-    const first = Math.max(0, Math.floor((this.scrollX - 10) / this.ppf / step) * step);
+    const first = this.firstFrame(step);
     for (let f = first; this.frameToX(f) < w; f += step) {
       const x = Math.round(this.frameToX(f)) + 0.5;
       ctx.strokeStyle = f % (step * 5) === 0 ? 'rgba(255,255,255,0.09)' : 'rgba(255,255,255,0.04)';
@@ -410,6 +432,14 @@ export class TimelinePanel {
       ctx.strokeRect(x + 0.5, y + 0.5, Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0));
     }
 
+  }
+
+  firstFrame(step) {
+    return Math.max(0, Math.floor((this.scrollX - 10) / this.ppf / step) * step);
+  }
+
+  drawRulerAndHead(ctx, w, h, ed, anim, fps, duration, endX) {
+    const first = this.firstFrame(1);
     // Règle.
     ctx.fillStyle = css('--panel-head') || '#2d2d30';
     ctx.fillRect(0, 0, w, RULER_H);
@@ -498,6 +528,18 @@ export class TimelinePanel {
         ed.setFrame(this.xToFrame(p.x));
         return;
       }
+      if (this.view === 'graph') {
+        if (p.x > NAME_W && this.graph.down(p, e)) {
+          this.drag = { kind: 'graph' };
+          return;
+        }
+        // Clic dans le vide : désélection et tête de lecture.
+        if (p.x > NAME_W) {
+          if (!e.shiftKey) ed.selectKeys([]);
+          ed.setFrame(this.xToFrame(p.x));
+        }
+        return;
+      }
       const ri = this.rowAt(p.y, rows);
       if (ri < 0) return;
       const row = rows[ri];
@@ -539,6 +581,8 @@ export class TimelinePanel {
       const ed = this.editor;
       if (d.kind === 'scrub') {
         ed.setFrame(this.xToFrame(p.x));
+      } else if (d.kind === 'graph') {
+        this.graph.move(p);
       } else if (d.kind === 'range') {
         d.b = this.xToFrame(p.x);
         this.draw();
@@ -576,7 +620,9 @@ export class TimelinePanel {
       this.drag = null;
       if (!d) return;
       const ed = this.editor;
-      if (d.kind === 'range') {
+      if (d.kind === 'graph') {
+        this.graph.up();
+      } else if (d.kind === 'range') {
         ed.setRange(d.a, d.b);
       } else if ((d.kind === 'keys' || d.kind === 'scale') && d.began) {
         ed.commit();
@@ -607,6 +653,7 @@ export class TimelinePanel {
     c.addEventListener('pointerup', end);
     c.addEventListener('pointercancel', () => {
       if ((this.drag?.kind === 'keys' || this.drag?.kind === 'scale') && this.drag.began) this.editor.cancel();
+      if (this.drag?.kind === 'graph') this.graph.cancel();
       this.drag = null;
       this.draw();
     });

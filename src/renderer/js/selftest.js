@@ -493,6 +493,44 @@ async function testV03({ editor, viewport, api, check, near, dragWorld, library,
   await wait(80);
   await api.selftestCapture('11-timeline');
 
+  // --- v0.4 : éditeur de courbes ---
+  timeline.toggleView();
+  editor.select(cou());
+  editor.selectKeys([{ owner: 'bone', name: 'cou', type: 'rotate', key: keys()[1] }]);
+  editor.setCurve('linear');
+  editor.selectKeys([{ owner: 'bone', name: 'cou', type: 'rotate', key: keys()[1] }]);
+  timeline.draw();
+  const ch = timeline.graph.lastChannels.find((c) => c.type === 'rotate');
+  check('courbes : la rotation de l\'os est tracée', Boolean(ch));
+  // Poignée de sortie de la clé 2 (vers la clé 3) : on la tire vers le haut à droite.
+  const hs = timeline.graph.handles(ch, 1);
+  tpointer('pointerdown', tr.left + hs[0].x, tr.top + hs[0].y);
+  tpointer('pointermove', tr.left + hs[0].x + 10, tr.top + hs[0].y - 30);
+  tpointer('pointerup', tr.left + hs[0].x + 10, tr.top + hs[0].y - 30);
+  const curved = keys()[1].curve;
+  check('courbes : glisser une poignée crée une courbe de Bézier', Array.isArray(curved) && curved.length === 4, JSON.stringify(curved));
+  // La pose entre les deux clés suit la courbe (différente du linéaire).
+  editor.setFrame(20);
+  const bez = cou().pose.rotation;
+  const k1 = keys()[1];
+  const k2 = keys()[2];
+  const lin = 90 + k1.value + (k2.value - k1.value) * ((20 / 30 - k1.time) / (k2.time - k1.time));
+  check('courbes : l\'interpolation suit la courbe', Math.abs(bez - lin) > 0.5, `${bez} vs linéaire ${lin}`);
+  // Glisser le point de la clé vers le bas : la valeur change.
+  const v1 = keys()[1].value;
+  const kx = timeline.graph.timeToX(keys()[1].time);
+  const ky = timeline.graph.valueToY(v1);
+  tpointer('pointerdown', tr.left + kx, tr.top + ky);
+  tpointer('pointermove', tr.left + kx, tr.top + ky + 25);
+  tpointer('pointerup', tr.left + kx, tr.top + ky + 25);
+  check('courbes : glisser une clé change sa valeur', keys()[1].value < v1 - 1, `${v1} → ${keys()[1].value}`);
+  editor.undo();
+  check('courbes : annuler', Math.abs(keys()[1].value - v1) < 0.01);
+  await frame();
+  await wait(60);
+  await api.selftestCapture('12-courbes');
+  timeline.toggleView();
+
   // 11. Retour en mode Configuration : pose de base.
   document.querySelector('.mode-btn[data-mode="setup"]').click();
   await frame();

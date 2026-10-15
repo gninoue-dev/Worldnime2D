@@ -542,6 +542,7 @@ async function start() {
     else if (ctrl && key === '2') run('mode-animate');
     else if (editor.animating && !ctrl && !e.altKey && key === 'p') run('play');
     else if (editor.animating && !ctrl && !e.altKey && key === 'k') run('key-bone');
+    else if (editor.animating && !ctrl && !e.altKey && key === 'g') timeline.toggleView();
     else if (editor.animating && !ctrl && key === 'arrowleft') run(e.shiftKey ? 'prev-key' : 'prev-frame');
     else if (editor.animating && !ctrl && key === 'arrowright') run(e.shiftKey ? 'next-key' : 'next-frame');
     else if (ctrl || e.altKey) return;

@@ -22,13 +22,20 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.3 — animation.** On construit un squelette, on y attache les images d'un personnage
-> (ou on importe directement un fichier Krita / Photoshop), puis on l'anime avec une timeline à clés.
-> Les courbes avancées, les maillages et les contraintes arrivent dans les prochaines versions.
+> **État actuel : v0.4 — courbes.** On construit un squelette, on y attache les images d'un personnage
+> (ou on importe directement un fichier Krita / Photoshop), puis on l'anime avec une timeline à clés
+> et un éditeur de courbes. Les maillages et les contraintes arrivent dans les prochaines versions.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Courbes (v0.4)
+
+- Interpolation par clé : linéaire, palier ou courbe de Bézier
+- **Éditeur de courbes** (bouton « Courbes » ou touche G) : les valeurs animées tracées dans le temps,
+  poignées de Bézier à tirer, valeur d'une clé réglable à la souris (Alt : la déplacer dans le temps)
+- Préréglages : accélération, ralentissement, les deux, dépassement, anticipation
 
 ### Animation (v0.3)
 

@@ -38,11 +38,11 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Pelure d'oignon (ghosting)
 - [x] Événements (entier, décimal, texte, son) posés sur la timeline, joués pendant la lecture
 
-## v0.4 — Courbes
+## v0.4 — Courbes ✅
 
-- [ ] Interpolations linéaire, palier (stepped) et Bézier
-- [ ] Éditeur de courbes (graph editor) avec poignées
-- [ ] Préréglages de courbes
+- [x] Interpolations linéaire, palier (stepped) et Bézier
+- [x] Éditeur de courbes (graph editor) avec poignées
+- [x] Préréglages de courbes
 
 ## v0.5 — Maillages et poids
 
