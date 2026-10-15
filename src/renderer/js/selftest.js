@@ -199,8 +199,14 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
 
   viewport.frameAll();
   await frame();
-  const bg = pixelAt(viewport, 2000, 2000);
-  const px = pixelAt(viewport, attTete.x, attTete.y);
+  // Point d'échantillonnage : dans la tête, à l'écart de l'axe vertical de la grille.
+  const probe = { x: attTete.x + attTete.width * 0.15, y: attTete.y + attTete.height * 0.1 };
+  viewport.attachments.visible = false;
+  viewport.render();
+  const bg = pixelAt(viewport, probe.x, probe.y);
+  viewport.attachments.visible = true;
+  viewport.render();
+  const px = pixelAt(viewport, probe.x, probe.y);
   check('l\'image est vraiment dessinée (shader)', Math.abs(px[0] - bg[0]) + Math.abs(px[1] - bg[1]) + Math.abs(px[2] - bg[2]) > 30, `${px} vs ${bg}`);
   await api.selftestCapture('04-import-ora');
 
@@ -220,13 +226,13 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
   check('annuler la rotation de l\'image', near(sk().visibleAttachment(sk().findSlot('tete')).rotation, r0));
 
   // 4. Couleur, transparence, teinte sombre et fusion.
-  const before = pixelAt(viewport, attTete.x, attTete.y);
+  const before = pixelAt(viewport, probe.x, probe.y);
   editor.apply(() => {
     const s = sk().findSlot('tete');
     s.color = '#ff0000ff';
   });
   await frame();
-  const red = pixelAt(viewport, attTete.x, attTete.y);
+  const red = pixelAt(viewport, probe.x, probe.y);
   check('teinte rouge appliquée', red[1] < before[1] * 0.5 + 5 && red[2] < before[2] * 0.5 + 5, `${before} → ${red}`);
   editor.apply(() => {
     const s = sk().findSlot('tete');
@@ -234,7 +240,7 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
     s.dark = '#00ff00';
   });
   await frame();
-  const dark = pixelAt(viewport, attTete.x, attTete.y);
+  const dark = pixelAt(viewport, probe.x, probe.y);
   check('teinte sombre appliquée', dark[1] >= before[1], `${before} → ${dark}`);
   editor.apply(() => {
     const s = sk().findSlot('tete');
@@ -338,7 +344,7 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
     check('import PSD : position de la tête', near(head.x, 0) && near(head.y, 415), `${head.x} ${head.y}`);
     viewport.frameAll();
     await frame();
-    const px = pixelAt(viewport, head.x, head.y);
+    const px = pixelAt(viewport, head.x + 15, head.y + 10);
     check('import PSD : couleur de la tête affichée', Math.abs(px[0] - 235) < 6 && Math.abs(px[1] - 190) < 6, String(px));
     await api.selftestCapture('09-import-psd');
   }
