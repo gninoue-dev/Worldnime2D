@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; worker-src 'self' blob:">
+  <title>Worldnime2D</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand"><img src="icon.png" alt=""><span>Worldnime2D</span></div>
+      <div class="mode">
+        <button class="mode-btn active" type="button" title="Mode Configuration : construire le squelette">Configuration</button>
+        <button class="mode-btn" type="button" disabled title="Arrive dans une prochaine version">Animation</button>
+      </div>
+      <div class="file-actions">
+        <button type="button" data-cmd="new" title="Nouveau (Ctrl+N)">Nouveau</button>
+        <button type="button" data-cmd="open" title="Ouvrir (Ctrl+O)">Ouvrir</button>
+        <button type="button" data-cmd="save" title="Enregistrer (Ctrl+S)">Enregistrer</button>
+        <span class="sep"></span>
+        <button type="button" data-cmd="undo" id="btn-undo" title="Annuler (Ctrl+Z)">↶</button>
+        <button type="button" data-cmd="redo" id="btn-redo" title="Rétablir (Ctrl+Y)">↷</button>
+      </div>
+    </header>
+
+    <nav class="tools" id="tools" aria-label="Outils"></nav>
+
+    <main class="viewport" id="viewport"></main>
+
+    <aside class="side">
+      <section class="panel panel-tree">
+        <h2>
+          <span>Arbre</span>
+          <span class="panel-actions">
+            <button type="button" data-cmd="add-child" title="Ajouter un os enfant">＋</button>
+            <button type="button" data-cmd="duplicate" title="Dupliquer (Ctrl+D)">⧉</button>
+            <button type="button" data-cmd="move-up" title="Monter">▲</button>
+            <button type="button" data-cmd="move-down" title="Descendre">▼</button>
+            <button type="button" data-cmd="delete" title="Supprimer (Suppr)">✕</button>
+          </span>
+        </h2>
+        <div class="panel-body" id="tree"></div>
+      </section>
+      <section class="panel panel-props">
+        <h2><span>Propriétés</span></h2>
+        <div class="panel-body" id="props"></div>
+      </section>
+    </aside>
+
+    <footer class="status" id="status"></footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="help">
+    <h2>Raccourcis clavier</h2>
+    <table>
+      <tr><td>V</td><td>Sélection</td></tr>
+      <tr><td>C</td><td>Créer un os : cliquer-glisser depuis le point d'attache. Le nouvel os est l'enfant de l'os sous la souris, sinon de l'os sélectionné. Clic sur un os : le sélectionner. Clic dans le vide : os de longueur nulle.</td></tr>
+      <tr><td>R</td><td>Rotation</td></tr>
+      <tr><td>T</td><td>Déplacement</td></tr>
+      <tr><td>S</td><td>Échelle (Maj : échelle uniforme)</td></tr>
+      <tr><td>H</td><td>Cisaillement (Maj : axe X au lieu de Y)</td></tr>
+      <tr><td>Maj</td><td>Pendant une rotation ou une création : angles par pas de 15°. Pendant un déplacement : sur un seul axe.</td></tr>
+      <tr><td>Échap</td><td>Annuler le geste en cours</td></tr>
+      <tr><td>Molette</td><td>Zoom</td></tr>
+      <tr><td>Clic droit, clic molette ou Espace + glisser</td><td>Déplacer la vue</td></tr>
+      <tr><td>F / Origine</td><td>Tout cadrer / centrer la vue</td></tr>
+      <tr><td>Ctrl+Z / Ctrl+Y</td><td>Annuler / rétablir</td></tr>
+      <tr><td>Ctrl+D / Suppr</td><td>Dupliquer / supprimer l'os sélectionné</td></tr>
+      <tr><td>Double-clic dans l'arbre</td><td>Renommer</td></tr>
+      <tr><td>Glisser un os sur un autre dans l'arbre</td><td>Changer de parent</td></tr>
+    </table>
+    <form method="dialog"><button>Fermer</button></form>
+  </dialog>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

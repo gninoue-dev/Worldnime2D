@@ -1,0 +1,76 @@
+{
+  "name": "worldnime2d",
+  "productName": "Worldnime2D",
+  "version": "0.1.0",
+  "description": "Éditeur d'animation 2D par squelette, libre et open source",
+  "author": {
+    "name": "Gninoue",
+    "email": "devgninoue@gmail.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/gninoue-dev/Worldnime2D",
+  "main": "src/main/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron . --no-sandbox",
+    "test": "node --test tests/",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "selftest": "npm run build && node scripts/selftest.mjs"
+  },
+  "build": {
+    "appId": "com.gninoue.worldnime2d",
+    "productName": "Worldnime2D",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/main/**",
+      "dist/**",
+      "!dist/*.map",
+      "package.json"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "wn2d",
+        "name": "Projet Worldnime2D",
+        "description": "Projet Worldnime2D",
+        "mimeType": "application/x-worldnime2d"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "maintainer": "Gninoue <devgninoue@gmail.com>",
+      "synopsis": "Éditeur d'animation 2D par squelette",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Worldnime2D",
+      "artifactName": "Worldnime2D-Setup-${version}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "pixi.js": "^8.22.0"
+  },
+  "type": "module",
+  "desktopName": "worldnime2d.desktop"
+}

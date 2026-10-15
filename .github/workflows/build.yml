@@ -1,0 +1,68 @@
+name: Tests et installeurs
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Tests du modèle
+        run: npm test
+      - name: Test automatique de l'interface
+        run: xvfb-run --auto-servernum npm run selftest
+
+  installeurs:
+    needs: tests
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            commande: dist:linux
+            fichiers: |
+              release/*.AppImage
+              release/*.deb
+          - os: windows-latest
+            commande: dist:win
+            fichiers: |
+              release/*.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run ${{ matrix.commande }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installeurs-${{ matrix.os }}
+          path: ${{ matrix.fichiers }}
+          if-no-files-found: error
+
+  publication:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: installeurs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: installeurs
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: installeurs/*
+          generate_release_notes: true
