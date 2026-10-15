@@ -36,8 +36,25 @@ jobs:
             selftest-output/
             selftest-output-webgl/
 
+  runtime-godot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Installer Godot (sans fenêtre)
+        run: |
+          curl -sSL -o godot.zip https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
+          unzip -q godot.zip
+          chmod +x Godot_v4.4.1-stable_linux.x86_64
+      - name: Comparer le runtime Godot à l'éditeur
+        run: node scripts/godot-check.mjs "$PWD/Godot_v4.4.1-stable_linux.x86_64"
+
   installeurs:
-    needs: tests
+    needs: [tests, runtime-godot]
     strategy:
       matrix:
         include:

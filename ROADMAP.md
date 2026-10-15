@@ -66,13 +66,13 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Os et contraintes propres à une skin
 - [x] Boîtes de collision (bounding box), découpe (clipping), points
 
-## v0.8 — Prévisualisation et export
+## v0.8 — Prévisualisation et export ✅
 
-- [ ] Mélange d'animations (mix) et pistes superposées dans l'aperçu
-- [ ] Empaqueteur de textures (atlas), avec rognage et rotation
-- [ ] Export JSON documenté pour les moteurs de jeu
-- [ ] Export en images PNG (séquences, planches de sprites), GIF et vidéo
-- [ ] Runtime **Godot 4** (lecture des animations dans un jeu)
+- [x] Mélange d'animations (mix) et pistes superposées dans l'aperçu
+- [x] Empaqueteur de textures (atlas), avec rognage et rotation
+- [x] Export JSON documenté pour les moteurs de jeu
+- [x] Export en images PNG (séquences, planches de sprites), GIF et vidéo
+- [x] Runtime **Godot 4** (lecture des animations dans un jeu)
 
 ## Ensuite
 

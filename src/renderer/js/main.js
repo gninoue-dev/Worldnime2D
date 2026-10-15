@@ -13,6 +13,7 @@ import { round } from './model/math.js';
 import { ImageLibrary, decodeImage, baseName } from './io/images.js';
 import { readLayerFile, canvasToPng, safeFileName } from './io/layers.js';
 import { runSelftest } from './selftest.js';
+import { exportData, renderFrames, exportPngSequence, exportSpriteSheet, exportGif, exportWebm } from './io/export.js';
 
 const api = window.worldnime;
 
@@ -410,6 +411,98 @@ async function start() {
     return { count: written.length, dir };
   };
 
+  // --- Export ------------------------------------------------------------------------------------
+  const exportDialog = document.getElementById('export');
+  const $ = (id) => document.getElementById(id);
+  let exportDir = null;
+
+  // Lance l'export selon les options ; renvoie la liste des fichiers écrits.
+  const runExport = async (opts, onStatus = () => {}) => {
+    const sk = editor.skeleton;
+    const written = [];
+    const safe = (s) => s.replace(/[\\/:*?"<>|]/g, '_');
+    if (opts.data) {
+      onStatus('Atlas et squelette…');
+      const r = await exportData({
+        skeleton: sk, library, api, dir: opts.dir, name: opts.name, appVersion: info.version,
+        atlasOptions: { scale: opts.textureScale, padding: opts.padding, maxSize: opts.maxSize, rotate: opts.rotate, pot: opts.pot, trim: opts.trim },
+      });
+      written.push(...r.files);
+    }
+    const kinds = ['png', 'sheet', 'gif', 'webm'].filter((k) => opts[k]);
+    if (kinds.length) {
+      const anims = opts.animation === '*' ? sk.animations.map((a) => a.name) : [opts.animation];
+      for (const animName of anims) {
+        const result = await renderFrames(sk, library, animName, {
+          fps: opts.fps, scale: opts.scale, margin: opts.margin, background: opts.transparent ? null : opts.background,
+          renderer: viewport.rendererName === 'webgl' ? 'webgl' : 'canvas',
+          onProgress: (i, n) => onStatus(`« ${animName} » : image ${i}/${n}…`),
+        });
+        const base = `${opts.name}_${safe(animName)}`;
+        const ctx = { result, api, dir: opts.dir, base };
+        if (opts.png) written.push(...(await exportPngSequence(ctx)));
+        if (opts.sheet) written.push(...(await exportSpriteSheet(ctx)));
+        if (opts.gif) {
+          onStatus(`« ${animName} » : GIF…`);
+          written.push(...(await exportGif(ctx)));
+        }
+        if (opts.webm) {
+          onStatus(`« ${animName} » : vidéo…`);
+          written.push(...(await exportWebm({ ...ctx, background: opts.background })));
+        }
+      }
+    }
+    return written;
+  };
+
+  const openExport = () => {
+    const sk = editor.skeleton;
+    $('ex-name').value ||= sk.name || 'squelette';
+    const sel = $('ex-anim');
+    sel.replaceChildren(new Option('Toutes les animations', '*'), ...sk.animations.map((a) => new Option(a.name, a.name)));
+    if (editor.animationName) sel.value = editor.animationName;
+    $('ex-dir-label').textContent = exportDir ?? 'Aucun dossier';
+    $('ex-progress').textContent = '';
+    exportDialog.showModal();
+  };
+  $('ex-dir').addEventListener('click', async () => {
+    const d = await api.chooseFolder('Dossier d\'export', exportDir || (editor.filePath && dirname(editor.filePath)));
+    if (d) {
+      exportDir = d;
+      $('ex-dir-label').textContent = d;
+    }
+  });
+  $('ex-go').addEventListener('click', async () => {
+    if (!exportDir) {
+      $('ex-progress').textContent = 'Choisissez d\'abord un dossier.';
+      return;
+    }
+    const opts = {
+      dir: exportDir, name: $('ex-name').value.trim() || 'squelette',
+      data: $('ex-data').checked, textureScale: Number($('ex-tscale').value), maxSize: Number($('ex-max').value),
+      padding: Number($('ex-pad').value) || 0, trim: $('ex-trim').checked, rotate: $('ex-rot').checked, pot: $('ex-pot').checked,
+      animation: $('ex-anim').value, png: $('ex-png').checked, sheet: $('ex-sheet').checked, gif: $('ex-gif').checked, webm: $('ex-webm').checked,
+      fps: Number($('ex-fps').value) || 30, scale: Number($('ex-scale').value), margin: Number($('ex-margin').value) || 0,
+      transparent: $('ex-transparent').checked, background: $('ex-bg').value,
+    };
+    if ((opts.png || opts.sheet || opts.gif || opts.webm) && !editor.skeleton.animations.length) {
+      $('ex-progress').textContent = 'Aucune animation à exporter en images.';
+      return;
+    }
+    $('ex-go').disabled = true;
+    try {
+      const files = await runExport(opts, (m) => {
+        $('ex-progress').textContent = m;
+      });
+      $('ex-progress').textContent = `${files.length} fichier(s) écrit(s) dans le dossier.`;
+      notify(`Export terminé : ${files.length} fichier(s).`, 'info');
+    } catch (err) {
+      $('ex-progress').textContent = `Échec : ${err.message}`;
+    } finally {
+      $('ex-go').disabled = false;
+    }
+  });
+
   // --- Commandes ----------------------------------------------------------------------------
 
   // Les commandes qui changent la structure du squelette ne marchent qu'en mode Configuration.
@@ -479,6 +572,7 @@ async function start() {
     save: () => save(false),
     'save-as': () => save(true),
     'import-layers': setupOnly(() => importLayers()),
+    export: () => openExport(),
     'choose-images': chooseImagesDir,
     'reload-images': () => library.reload(),
     'choose-reference': chooseReference,
@@ -574,7 +668,7 @@ async function start() {
   await loadFile(await api.pendingFile());
 
   if (info.selftest) {
-    runSelftest({ editor, viewport, api, library, actions, importLayers, info, setTab, timeline });
+    runSelftest({ editor, viewport, api, library, actions, importLayers, info, setTab, timeline, runExport });
   }
 }
 

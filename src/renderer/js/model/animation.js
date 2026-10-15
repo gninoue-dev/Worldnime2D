@@ -10,7 +10,7 @@
 
 import { evaluateCurve, isValidCurve } from './curve.js';
 import { hexToRgba, rgbaToHex, isRgb, isRgba } from './color.js';
-import { round } from './math.js';
+import { round, wrapDeg } from './math.js';
 
 export const BONE_TIMELINES = ['rotate', 'translate', 'scale', 'shear'];
 export const SLOT_TIMELINES = ['attachment', 'rgba', 'rgba2'];
@@ -298,7 +298,9 @@ export class Animation {
       if (tls.rotate) {
         const v = sample(tls.rotate, time, ['value']);
         const target = bone.rotation + (v ? v[0] : 0);
-        p.rotation += (target - p.rotation) * alpha;
+        // Pendant un mélange, la rotation prend le plus court chemin.
+        if (alpha >= 1) p.rotation = target;
+        else p.rotation += wrapDeg(target - p.rotation) * alpha;
       }
       if (tls.translate) {
         const v = sample(tls.translate, time, ['x', 'y']);

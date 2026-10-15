@@ -4,6 +4,7 @@
 import { Skeleton } from '../model/skeleton.js';
 import { serializeProject, parseProject, projectToText } from '../model/format.js';
 import { TIME_EPSILON, CONSTRAINT_TIMELINES } from '../model/animation.js';
+import { AnimationState } from '../model/animationstate.js';
 
 const HISTORY_LIMIT = 200;
 
@@ -52,12 +53,16 @@ export class Editor extends EventTarget {
     // Simulation physique en continu dans la vue (contraintes physiques).
     this.physicsLive = true;
     this.selectedConstraint = null;
+    // Aperçu des mélanges (plusieurs pistes) : null quand il est arrêté.
+    this.preview = null;
+    this.previewMix = 0.2;
     // Clés sélectionnées dans la timeline : { owner, name, type, key }.
     this.selectedKeys = [];
     this.reset(new Skeleton());
   }
 
   reset(skeleton, filePath = null) {
+    this.preview = null;
     this.skeleton = skeleton;
     this.animationName = skeleton.animations[0]?.name ?? null;
     this.time = 0;
@@ -108,6 +113,7 @@ export class Editor extends EventTarget {
   }
 
   restore(state) {
+    this.preview = null;
     const { project, selected, slot, attachment, animation, constraint } = JSON.parse(state);
     this.skeleton = parseProject(JSON.stringify(project));
     this.selected = (selected && this.skeleton.findBone(selected)) || this.skeleton.root;
@@ -258,7 +264,10 @@ export class Editor extends EventTarget {
   // physics : 'pose' (appliquer la simulation sans l'avancer), 'update' (l'avancer) ou 'reset'.
   refreshPose(applyOptions = undefined, physics = 'pose') {
     const sk = this.skeleton;
-    if (this.mode === 'animate') {
+    if (this.preview && this.mode === 'animate') {
+      sk.posed = true;
+      this.preview.apply(sk);
+    } else if (this.mode === 'animate') {
       sk.posed = true;
       sk.setToSetupPose();
       this.animation?.apply(sk, this.time, applyOptions);
@@ -305,6 +314,7 @@ export class Editor extends EventTarget {
   setMode(mode) {
     if (mode === this.mode) return;
     this.playing = false;
+    this.preview = null;
     this.meshTool = null;
     if (mode === 'animate' && !this.animation) {
       if (this.skeleton.animations.length === 0) {
@@ -342,8 +352,33 @@ export class Editor extends EventTarget {
     this.setTime(Math.max(0, Math.round(frame)) / this.fps);
   }
 
+  // --- Aperçu des mélanges -------------------------------------------------------------
+
+  startPreview() {
+    if (!this.animating) return null;
+    this.preview = new AnimationState(this.skeleton, { defaultMix: this.previewMix });
+    this.preview.onEvent = (track, k) => this.dispatchEvent(new CustomEvent('events', { detail: [k] }));
+    this.playing = true;
+    this.emit('preview');
+    return this.preview;
+  }
+
+  stopPreview() {
+    this.preview = null;
+    this.playing = false;
+    this.refreshPose();
+    this.emit('preview');
+  }
+
   // Avance la lecture de dt secondes. Renvoie les événements déclenchés.
   step(dt) {
+    if (this.preview) {
+      this.preview.update(dt * this.speed);
+      this.skeleton.time += dt * this.speed;
+      this.refreshPose(undefined, 'update');
+      this.emit('time');
+      return [];
+    }
     const anim = this.animation;
     const duration = anim?.duration ?? 0;
     if (!this.playing || duration <= 0) {
@@ -409,6 +444,11 @@ export class Editor extends EventTarget {
   }
 
   togglePlay() {
+    if (this.preview) {
+      this.playing = !this.playing;
+      this.emit('play');
+      return;
+    }
     const anim = this.animation;
     if (!this.animating || !anim) return;
     if (!this.playing && !this.loop && this.time >= anim.duration - TIME_EPSILON) this.time = 0;

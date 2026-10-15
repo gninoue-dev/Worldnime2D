@@ -98,6 +98,7 @@ function buildMenu() {
         { label: 'Enregistrer sous…', accelerator: 'CmdOrCtrl+Shift+S', click: () => send('save-as') },
         { type: 'separator' },
         { label: 'Importer un fichier à calques (ORA, PSD)…', accelerator: 'CmdOrCtrl+I', click: () => send('import-layers') },
+        { label: 'Exporter (jeux, images, GIF, vidéo)…', accelerator: 'CmdOrCtrl+E', click: () => send('export') },
         { label: 'Choisir le dossier d\'images…', click: () => send('choose-images') },
         { label: 'Recharger les images', accelerator: 'F5', click: () => send('reload-images') },
         { type: 'separator' },
@@ -345,7 +346,7 @@ ipcMain.handle('dialog:choose-file', async (_e, { title, kind }) => {
 
 // Lecture d'un fichier image ou à calques choisi par l'utilisateur.
 ipcMain.handle('file:read-binary', async (_e, file) => {
-  if (!/\.(png|jpe?g|webp|ora|psd|ogg|mp3|wav)$/i.test(file)) throw new Error('Type de fichier non pris en charge.');
+  if (!/\.(png|jpe?g|webp|ora|psd|ogg|mp3|wav|json|gif|webm)$/i.test(file)) throw new Error('Type de fichier non pris en charge.');
   return fs.readFile(file);
 });
 

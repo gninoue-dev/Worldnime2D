@@ -184,7 +184,83 @@ export class AnimationsPanel {
       wrap.appendChild(form);
     }
 
+    if (ed.animating && sk.animations.length) wrap.appendChild(this.previewSection());
+
     this.host.replaceChildren(wrap);
+  }
+
+  // Aperçu des mélanges : plusieurs pistes, fondus entre animations, file d'attente.
+  previewSection() {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    const box = document.createElement('div');
+    box.appendChild(header('Aperçu des mélanges', []));
+    const form = document.createElement('div');
+    form.className = 'props preview-box';
+    const mixRow = document.createElement('label');
+    mixRow.className = 'prop-row';
+    const mixLabel = document.createElement('span');
+    mixLabel.textContent = 'Fondu (s)';
+    const mix = document.createElement('input');
+    mix.type = 'number';
+    mix.step = '0.05';
+    mix.min = '0';
+    mix.value = String(ed.previewMix);
+    mix.addEventListener('change', () => {
+      ed.previewMix = Math.max(0, Number(mix.value) || 0);
+      if (ed.preview) ed.preview.defaultMix = ed.previewMix;
+    });
+    mixRow.append(mixLabel, mix);
+    form.appendChild(mixRow);
+    this.previewChoice ??= [];
+    for (let track = 0; track < 3; track++) {
+      const row = document.createElement('div');
+      row.className = 'preview-track';
+      const lab = document.createElement('span');
+      lab.textContent = `Piste ${track}`;
+      const sel = document.createElement('select');
+      sel.appendChild(new Option('—', ''));
+      for (const a of sk.animations) sel.appendChild(new Option(a.name, a.name));
+      sel.value = this.previewChoice[track]?.name ?? (track === 0 ? ed.animationName ?? '' : '');
+      const loop = document.createElement('input');
+      loop.type = 'checkbox';
+      loop.checked = this.previewChoice[track]?.loop ?? true;
+      loop.title = 'En boucle';
+      const save = () => {
+        this.previewChoice[track] = { name: sel.value, loop: loop.checked };
+      };
+      sel.addEventListener('change', save);
+      loop.addEventListener('change', save);
+      const act = (text, title, fn) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = text;
+        b.title = title;
+        b.addEventListener('click', () => {
+          save();
+          const st = ed.preview ?? ed.startPreview();
+          if (!st) return;
+          fn(st, sel.value ? sk.findAnimation(sel.value) : null, loop.checked);
+          ed.playing = true;
+          ed.emit('preview');
+        });
+        return b;
+      };
+      row.append(lab, sel, loop,
+        act('▶', 'Lancer sur cette piste (fondu depuis l\'animation en cours)', (st, a, l) => (a ? st.setAnimation(track, a, l) : st.setEmptyAnimation(track, ed.previewMix))),
+        act('⤵', 'Enchaîner après l\'animation en cours de cette piste', (st, a, l) => a && st.addAnimation(track, a, l, 0)),
+        act('∅', 'Vider la piste (fondu)', (st) => st.setEmptyAnimation(track, ed.previewMix)));
+      form.appendChild(row);
+    }
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.className = 'prop-button';
+    stop.textContent = ed.preview ? '■ Arrêter l\'aperçu (retour à la timeline)' : 'L\'aperçu démarre au premier ▶';
+    stop.disabled = !ed.preview;
+    stop.addEventListener('click', () => ed.stopPreview());
+    form.appendChild(stop);
+    box.appendChild(form);
+    return box;
   }
 }
 

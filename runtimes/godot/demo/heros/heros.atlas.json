@@ -1,0 +1,112 @@
+{
+  "format": "worldnime2d-atlas",
+  "version": 1,
+  "scale": 0.5,
+  "pages": [
+    {
+      "file": "heros.png",
+      "width": 80,
+      "height": 501
+    }
+  ],
+  "regions": {
+    "torse": {
+      "page": 0,
+      "x": 0,
+      "y": 0,
+      "width": 70,
+      "height": 165,
+      "rotated": false,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 140,
+      "trimmedHeight": 330,
+      "originalWidth": 140,
+      "originalHeight": 330
+    },
+    "jambe_g": {
+      "page": 0,
+      "x": 0,
+      "y": 167,
+      "width": 23,
+      "height": 135,
+      "rotated": false,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 45,
+      "trimmedHeight": 270,
+      "originalWidth": 45,
+      "originalHeight": 270
+    },
+    "jambe_d": {
+      "page": 0,
+      "x": 0,
+      "y": 304,
+      "width": 23,
+      "height": 135,
+      "rotated": false,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 45,
+      "trimmedHeight": 270,
+      "originalWidth": 45,
+      "originalHeight": 270
+    },
+    "tete": {
+      "page": 0,
+      "x": 0,
+      "y": 441,
+      "width": 60,
+      "height": 80,
+      "rotated": true,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 120,
+      "trimmedHeight": 160,
+      "originalWidth": 120,
+      "originalHeight": 160
+    },
+    "bras_g": {
+      "page": 0,
+      "x": 25,
+      "y": 167,
+      "width": 25,
+      "height": 125,
+      "rotated": false,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 50,
+      "trimmedHeight": 250,
+      "originalWidth": 50,
+      "originalHeight": 250
+    },
+    "bras_d": {
+      "page": 0,
+      "x": 25,
+      "y": 294,
+      "width": 25,
+      "height": 125,
+      "rotated": false,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 50,
+      "trimmedHeight": 250,
+      "originalWidth": 50,
+      "originalHeight": 250
+    },
+    "ombre": {
+      "page": 0,
+      "x": 52,
+      "y": 167,
+      "width": 110,
+      "height": 20,
+      "rotated": true,
+      "offsetX": 0,
+      "offsetY": 0,
+      "trimmedWidth": 220,
+      "trimmedHeight": 40,
+      "originalWidth": 220,
+      "originalHeight": 40
+    }
+  }
+}

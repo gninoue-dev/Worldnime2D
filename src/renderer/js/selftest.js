@@ -147,6 +147,7 @@ export async function runSelftest({ editor, viewport, api, ...extra }) {
     if (extra.info?.selftestOra) await testV05({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     await testV06({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     if (extra.info?.selftestOra) await testV07({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
+    if (extra.info?.selftestOra) await testV08({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
   } catch (err) {
     check('exception', false, err.stack || err.message);
   }
@@ -964,4 +965,120 @@ async function testV07({ editor, viewport, api, check, near, pointer, dragWorld,
   const again = parseProject(editor.toText());
   check('skins et pièces spéciales enregistrées et relues', again.findSkin('skin')?.get('tete', 'tete')
     && [...again.attachmentsOf(again.findSlot(bb.name)).values()][0].att.type === 'boundingbox');
+}
+
+// --- v0.8 : aperçu des mélanges et export --------------------------------------------------------
+
+async function testV08({ editor, viewport, api, check, near, library, importLayers, info, setTab, runExport }) {
+  const sk = () => editor.skeleton;
+  const { Skeleton } = await import('./model/skeleton.js');
+  editor.setMode('setup');
+  editor.reset(new Skeleton());
+  await waitFor(() => library.dir === null);
+  await importLayers(info.selftestOra, `${info.selftestDir}/images_export`);
+  // Un os « bras » pour le bras droit, et deux animations.
+  editor.apply(() => {
+    const b = sk().addBone('bras', sk().root);
+    const slot = sk().findSlot('bras_d');
+    const att = sk().visibleAttachment(slot);
+    b.x = att.x;
+    b.y = att.y + att.height / 2;
+    b.rotation = -90;
+    b.length = att.height;
+    sk().updateWorldTransform();
+    sk().setSlotBone(slot, b);
+    const leve = sk().addAnimation('leve');
+    leve.setKey('bone', 'bras', 'rotate', { time: 0, value: 0 });
+    leve.setKey('bone', 'bras', 'rotate', { time: 0.5, value: 120 });
+    leve.setKey('bone', 'bras', 'rotate', { time: 1, value: 0 });
+    const repos = sk().addAnimation('repos');
+    repos.setKey('bone', 'bras', 'rotate', { time: 0, value: -20 });
+    repos.setKey('bone', 'bras', 'rotate', { time: 1, value: -20 });
+  });
+  sk().name = 'heros';
+
+  // 1. Aperçu des mélanges : « repos » puis fondu vers « leve ».
+  editor.setMode('animate');
+  editor.setAnimation('repos');
+  setTab('animations');
+  await frame();
+  const st = editor.startPreview();
+  st.defaultMix = 0.5;
+  st.setAnimation(0, sk().findAnimation('repos'), true);
+  editor.step(0.1);
+  const r0 = sk().findBone('bras').pose.rotation;
+  st.setAnimation(0, sk().findAnimation('leve'), true);
+  editor.step(0.25);
+  const mid = sk().findBone('bras').pose.rotation;
+  check('aperçu : fondu entre deux animations', near(r0, -110, 0.01) && mid > -110 + 5 && st.tracks[0].from, `${r0} → ${mid}`);
+  editor.step(0.5);
+  check('aperçu : fondu terminé', !st.tracks[0].from);
+  editor.stopPreview();
+  editor.setMode('setup');
+
+  // 2. Export complet.
+  const dir = `${info.selftestDir}/export`;
+  const files = await runExport({
+    dir, name: 'heros', data: true, textureScale: 0.5, maxSize: 512, padding: 2, trim: true, rotate: true, pot: false,
+    animation: 'leve', png: true, sheet: true, gif: true, webm: true, fps: 12, scale: 0.5, margin: 4, transparent: true, background: '#ffffff',
+  });
+  check('export : fichiers écrits', files.includes('heros.json') && files.includes('heros.atlas.json') && files.includes('heros.png')
+    && files.includes('heros_leve.gif') && files.includes('heros_leve.webm') && files.includes('heros_leve_planche.png'), files.join(', '));
+  const read = async (f) => api.readBinary(`${dir}/${f}`);
+  const json = JSON.parse(new TextDecoder().decode(await read('heros.json')));
+  const atlas = JSON.parse(new TextDecoder().decode(await read('heros.atlas.json')));
+  const { parseProject } = await import('./model/format.js');
+  check('export : le squelette JSON se relit', Boolean(parseProject(JSON.stringify(json)).findAnimation('leve')) && json.export.atlas === 'heros.atlas.json'
+    && !json.skeleton.images);
+  check('export : une région par image utilisée', Object.keys(atlas.regions).length === library.list.length, Object.keys(atlas.regions).length);
+
+  // 3. Chaque région de l'atlas contient bien son image (rognée, réduite, éventuellement tournée).
+  const pages = await Promise.all(atlas.pages.map(async (p) => createImageBitmap(new Blob([await read(p.file)], { type: 'image/png' }))));
+  const pixel = (bmp, x, y) => {
+    const c = new OffscreenCanvas(1, 1);
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, Math.floor(x), Math.floor(y), 1, 1, 0, 0, 1, 1);
+    return ctx.getImageData(0, 0, 1, 1).data;
+  };
+  let good = 0;
+  let total = 0;
+  for (const [path, r] of Object.entries(atlas.regions)) {
+    const src = library.get(path).bitmap;
+    // Centre de la zone rognée, dans l'image source et dans la page.
+    const sx = r.offsetX + r.trimmedWidth * 0.5;
+    const sy = r.offsetY + r.trimmedHeight * 0.5;
+    const u = 0.5;
+    const v = 0.5;
+    const px = r.rotated ? r.x + r.height * (1 - v) : r.x + r.width * u;
+    const py = r.rotated ? r.y + r.width * u : r.y + r.height * v;
+    const a = pixel(src, sx, sy);
+    const b = pixel(pages[r.page], px, py);
+    total++;
+    if (Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 40 && Math.abs(a[3] - b[3]) < 60) good++;
+  }
+  check('export : contenu des régions de l\'atlas', good === total, `${good}/${total}`);
+  const rotated = Object.values(atlas.regions).some((r) => r.rotated);
+  // (Les images importées d'un ORA sont déjà rognées : la zone rognée ne peut pas dépasser l'original.)
+  check('export : zones rognées cohérentes, réduites à 50 %', Object.values(atlas.regions).every((r) => r.trimmedWidth <= r.originalWidth
+    && Math.abs(r.width - Math.round(r.trimmedWidth * 0.5)) <= 1), `rotation utilisée : ${rotated}`);
+
+  // 4. GIF : décodé par le navigateur, une image par pas de temps.
+  const gifBytes = await read('heros_leve.gif');
+  let gifFrames = -1;
+  if (typeof ImageDecoder !== 'undefined') {
+    const dec = new ImageDecoder({ data: gifBytes, type: 'image/gif' });
+    await dec.tracks.ready;
+    gifFrames = dec.tracks.selectedTrack.frameCount;
+    const first = await dec.decode({ frameIndex: 0 });
+    check('export GIF : première image décodable', first.image.displayWidth > 0);
+    first.image.close();
+    dec.close();
+  }
+  check('export GIF : 12 images (1 s à 12 images/s)', gifFrames === 12, gifFrames);
+  const sheetMeta = JSON.parse(new TextDecoder().decode(await read('heros_leve_planche.json')));
+  check('export : planche de sprites (12 images)', sheetMeta.frames.length === 12);
+  const webm = await read('heros_leve.webm');
+  check('export : vidéo WebM (en-tête EBML)', webm.length > 500 && webm[0] === 0x1a && webm[1] === 0x45 && webm[2] === 0xdf && webm[3] === 0xa3, webm.length);
+  const png0 = await createImageBitmap(new Blob([await read('heros_leve_000.png')], { type: 'image/png' }));
+  check('export : séquence PNG', png0.width > 10 && png0.height > 10, `${png0.width}×${png0.height}`);
 }

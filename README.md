@@ -22,14 +22,26 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.7 — skins.** On construit un squelette, on y attache les images d'un personnage
+> **État actuel : v0.8 — export.** On construit un squelette, on y attache les images d'un personnage
 > (ou on importe un fichier Krita / Photoshop), on les transforme en maillages déformables liés à plusieurs
-> os, on ajoute des contraintes (IK, transformation, chemin, physique) et des skins (tenues), puis on anime
-> avec une timeline à clés et un éditeur de courbes. L'export pour les jeux arrive dans la prochaine version.
+> os, on ajoute des contraintes (IK, transformation, chemin, physique) et des skins, on anime avec une
+> timeline à clés et un éditeur de courbes, puis on exporte pour un jeu (runtime Godot 4 fourni) ou en
+> images (PNG, planche de sprites, GIF, vidéo).
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Aperçu et export (v0.8)
+
+- **Aperçu des mélanges** (onglet Anim.) : plusieurs pistes superposées, fondus entre animations,
+  enchaînements (file d'attente)
+- **Export pour les jeux** (Ctrl+E) : squelette JSON + **atlas de textures** (empaquetage MaxRects,
+  rognage des bords transparents, rotation, marge, échelle, pages multiples)
+- **Runtime Godot 4** ([runtimes/godot](runtimes/godot/README.md)) : un nœud `Worldnime2DSkeleton` qui
+  affiche et anime les personnages exportés (tout ce que fait l'éditeur), vérifié automatiquement contre
+  l'éditeur
+- **Export en images** : séquence PNG, planche de sprites, GIF animé, vidéo WebM ([détails](docs/EXPORT.md))
 
 ### Skins et pièces jointes spéciales (v0.7)
 
@@ -135,6 +147,7 @@ npm test             # tests du modèle (squelette, maths, format de fichier)
 npm run selftest     # test automatique de l'interface (pilote la souris, importe ORA et PSD, vérifie les pixels)
 npm run dist:linux   # construit l'AppImage et le .deb dans release/
 npm run dist:win     # construit l'installeur Windows (sous Windows, ou via GitHub Actions)
+node scripts/godot-check.mjs /chemin/vers/godot   # compare le runtime Godot à l'éditeur
 ```
 
 Sous Linux, `npm start` lance Electron avec `--no-sandbox`, car le bac à sable de Chromium
@@ -155,6 +168,7 @@ src/renderer/js/
   io/                 bibliothèque d'images, import ORA / PSD
 tests/                tests du modèle et de l'éditeur (node --test)
 tests/fixtures/       petits fichiers ORA et PSD de test (et les scripts qui les génèrent)
+runtimes/godot/       runtime Godot 4 (addon), démo, projet de vérification
 ```
 
 ## Remarque

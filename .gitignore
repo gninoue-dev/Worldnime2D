@@ -4,3 +4,9 @@ release/
 selftest-output/
 *.tmp
 selftest-output-webgl/
+runtimes/godot/test_project/addons/
+runtimes/godot/test_project/data/
+runtimes/godot/test_project/.godot/
+runtimes/godot/demo/addons/
+runtimes/godot/demo/.godot/
+runtimes/godot/demo/capture.png

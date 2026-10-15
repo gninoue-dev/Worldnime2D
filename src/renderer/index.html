@@ -66,6 +66,45 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+  <dialog id="export" class="export-dialog">
+    <h2>Exporter</h2>
+    <form method="dialog" id="export-form">
+      <fieldset>
+        <legend>Destination</legend>
+        <div class="ex-row"><button type="button" id="ex-dir">Choisir le dossier…</button><span id="ex-dir-label" class="ex-path">Aucun dossier</span></div>
+        <label class="ex-row">Nom des fichiers <input type="text" id="ex-name" required></label>
+      </fieldset>
+      <fieldset>
+        <legend><label><input type="checkbox" id="ex-data" checked> Pour les jeux : squelette JSON + atlas de textures</label></legend>
+        <label class="ex-row">Échelle des textures
+          <select id="ex-tscale"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.25">25 %</option></select></label>
+        <label class="ex-row">Taille max. des pages
+          <select id="ex-max"><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option></select></label>
+        <label class="ex-row">Marge entre images (px) <input type="number" id="ex-pad" value="2" min="0" max="32"></label>
+        <label class="ex-check"><input type="checkbox" id="ex-trim" checked> Rogner les bords transparents</label>
+        <label class="ex-check"><input type="checkbox" id="ex-rot" checked> Autoriser la rotation (meilleur remplissage)</label>
+        <label class="ex-check"><input type="checkbox" id="ex-pot"> Pages en puissances de deux</label>
+      </fieldset>
+      <fieldset>
+        <legend>Images de l'animation</legend>
+        <label class="ex-row">Animation <select id="ex-anim"></select></label>
+        <div class="ex-kinds">
+          <label><input type="checkbox" id="ex-png"> Séquence PNG</label>
+          <label><input type="checkbox" id="ex-sheet"> Planche de sprites</label>
+          <label><input type="checkbox" id="ex-gif"> GIF animé</label>
+          <label><input type="checkbox" id="ex-webm"> Vidéo WebM</label>
+        </div>
+        <label class="ex-row">Images par seconde <input type="number" id="ex-fps" value="30" min="1" max="120"></label>
+        <label class="ex-row">Échelle <select id="ex-scale"><option value="0.25">25 %</option><option value="0.5">50 %</option><option value="1" selected>100 %</option><option value="2">200 %</option></select></label>
+        <label class="ex-row">Marge autour (px) <input type="number" id="ex-margin" value="8" min="0" max="200"></label>
+        <label class="ex-check"><input type="checkbox" id="ex-transparent" checked> Fond transparent (la vidéo utilise la couleur)</label>
+        <label class="ex-row">Couleur de fond <input type="color" id="ex-bg" value="#ffffff"></label>
+      </fieldset>
+      <p id="ex-progress" class="ex-progress" role="status"></p>
+      <div class="ex-actions"><button value="cancel" type="submit">Fermer</button><button type="button" id="ex-go" class="primary">Exporter</button></div>
+    </form>
+  </dialog>
+
   <dialog id="help">
     <h2>Raccourcis clavier</h2>
     <table>
@@ -87,6 +126,7 @@
       <tr><td>Clic sur une image</td><td>Sélectionner l'image ; les outils Rotation, Déplacement et Échelle la transforment</td></tr>
       <tr><td>Onglet Images</td><td>Glisser une image sur la vue ou sur un os pour l'attacher (crée un slot)</td></tr>
       <tr><td>Onglet Ordre</td><td>Glisser les slots pour changer l'ordre d'affichage (en haut = devant)</td></tr>
+      <tr><td>Ctrl+E</td><td>Exporter : squelette JSON + atlas pour les jeux, séquence PNG, planche de sprites, GIF, vidéo WebM</td></tr>
       <tr><td>Ctrl+I</td><td>Importer un fichier à calques ORA (Krita, GIMP) ou PSD (Photoshop)</td></tr>
       <tr><td>F5</td><td>Recharger les images (automatique quand un fichier change)</td></tr>
       <tr><td>Ctrl+1 / Ctrl+2</td><td>Mode Configuration / mode Animation</td></tr>

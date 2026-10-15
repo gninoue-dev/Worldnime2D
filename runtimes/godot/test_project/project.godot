@@ -1,0 +1,5 @@
+; Projet de test du runtime Worldnime2D (utilisé par scripts/godot-check.mjs).
+config_version=5
+
+[application]
+config/name="Worldnime2D - test du runtime"
