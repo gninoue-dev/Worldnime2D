@@ -22,12 +22,28 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.1 — le squelette.** On peut construire et enregistrer un squelette.
-> Les images, les maillages et l'animation arrivent dans les prochaines versions.
+> **État actuel : v0.2 — images et slots.** On peut construire un squelette, y attacher les images
+> d'un personnage (ou importer directement un fichier Krita / Photoshop) et régler l'ordre d'affichage.
+> L'animation, les maillages et les contraintes arrivent dans les prochaines versions.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
-## Ce que fait la v0.1
+## Ce que fait Worldnime2D aujourd'hui
+
+### Images et slots (v0.2)
+
+- Import d'un fichier à calques **ORA** (Krita, GIMP, MyPaint) ou **PSD** (Photoshop) : un PNG recadré par calque,
+  un slot par calque, ordre d'affichage et positions repris du document. Réimporter met les images à jour.
+- Dossier d'images surveillé : une image retouchée dans Krita se met à jour toute seule dans l'éditeur
+- Onglet **Images** : glisser une image sur la vue ou sur un os pour l'attacher
+- Slots avec plusieurs pièces jointes (on choisit celle qui est visible), changement d'os sans que l'image bouge
+- Clic sur une image pour la sélectionner (au pixel près), outils Rotation / Déplacement / Échelle sur les images
+- Onglet **Ordre** : ordre d'affichage par glisser-déposer
+- Couleur et opacité des slots et des images, **teinte sombre** (« tint black »), modes de fusion normal, additif, produit, écran
+- Image de référence en fond, avec opacité, échelle et position
+- Chemins enregistrés relativement au projet : on peut déplacer le dossier du projet avec ses images
+
+### Squelette (v0.1)
 
 - Création d'os à la souris (cliquer-glisser), os de longueur nulle, hiérarchie parent / enfants
 - Outils Sélection, Rotation, Déplacement, Échelle, Cisaillement (Maj pour aimanter à 15°)
@@ -58,7 +74,7 @@ cd Worldnime2D
 npm install
 npm start            # lance l'éditeur
 npm test             # tests du modèle (squelette, maths, format de fichier)
-npm run selftest     # test automatique de l'interface (pilote la souris et prend des captures)
+npm run selftest     # test automatique de l'interface (pilote la souris, importe ORA et PSD, vérifie les pixels)
 npm run dist:linux   # construit l'AppImage et le .deb dans release/
 npm run dist:win     # construit l'installeur Windows (sous Windows, ou via GitHub Actions)
 ```
@@ -74,11 +90,13 @@ construit les installeurs Windows et Linux et les publie dans une Release.
 ```
 src/main/             processus principal d'Electron (fenêtre, menus, fichiers)
 src/renderer/js/
-  model/              squelette, os, calcul des transformations, format .wn2d (sans dépendance, testé)
+  model/              squelette, os, slots, pièces jointes, skins, format .wn2d (sans dépendance, testé)
   editor/             état de l'éditeur, sélection, outils, annuler/rétablir
-  view/               zone de dessin PixiJS et gestion de la souris
-  ui/                 panneaux Arbre et Propriétés
-tests/                tests du modèle (node --test)
+  view/               zone de dessin PixiJS, shader « deux couleurs », gestion de la souris
+  ui/                 panneaux Arbre, Ordre, Images et Propriétés
+  io/                 bibliothèque d'images, import ORA / PSD
+tests/                tests du modèle et de l'éditeur (node --test)
+tests/fixtures/       petits fichiers ORA et PSD de test (et les scripts qui les génèrent)
 ```
 
 ## Remarque

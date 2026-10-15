@@ -1,167 +1,343 @@
-// Panneau « Propriétés » : les valeurs de la pose de base de l'os sélectionné.
+// Panneau « Propriétés » : les valeurs de l'élément sélectionné (os, slot ou pièce jointe),
+// plus les réglages du squelette (nom, dossier d'images, image de référence).
+//
+// Chaque champ est décrit par un objet { type, label, get, set, … }. Le formulaire est reconstruit
+// quand la sélection change de nature, et seulement rafraîchi sinon.
 
 import { INHERIT_LABELS } from '../model/bone.js';
+import { BLEND_LABELS } from '../model/slot.js';
+import { splitAlpha, joinAlpha } from '../model/color.js';
 import { round } from '../model/math.js';
 
-const NUMBER_FIELDS = [
-  { key: 'length', label: 'Longueur', step: 1, min: 0 },
-  { key: 'x', label: 'X', step: 1 },
-  { key: 'y', label: 'Y', step: 1 },
-  { key: 'rotation', label: 'Rotation', step: 1, unit: '°' },
-  { key: 'scaleX', label: 'Échelle X', step: 0.05 },
-  { key: 'scaleY', label: 'Échelle Y', step: 0.05 },
-  { key: 'shearX', label: 'Cisaillement X', step: 1, unit: '°' },
-  { key: 'shearY', label: 'Cisaillement Y', step: 1, unit: '°' },
-];
-
 export class PropertiesPanel {
-  constructor(editor, host, notify) {
+  constructor(editor, host, notify, actions) {
     this.editor = editor;
     this.host = host;
     this.notify = notify;
-    this.build();
+    this.actions = actions;
+    this.signature = null;
+    this.rows = [];
     editor.addEventListener('change', () => this.refresh());
     this.refresh();
+  }
+
+  // Modifie le modèle avec une étape d'historique ; affiche l'erreur s'il y en a une.
+  change(fn) {
+    try {
+      this.editor.apply(fn);
+    } catch (err) {
+      this.notify(err.message);
+      this.refreshValues();
+    }
+  }
+
+  sections() {
+    const editor = this.editor;
+    const sk = editor.skeleton;
+    const kind = editor.selectionKind;
+    const out = [];
+
+    const skel = [
+      { type: 'text', label: 'Nom', get: () => sk.name, set: (v) => this.change(() => { sk.name = v.trim() || 'squelette'; }) },
+      {
+        type: 'button', label: 'Images', text: () => (sk.images ? sk.images : 'Choisir le dossier…'),
+        title: 'Dossier des images du personnage', onClick: () => this.actions.chooseImagesDir(),
+      },
+    ];
+    if (sk.reference) {
+      const ref = sk.reference;
+      skel.push(
+        { type: 'checkbox', label: 'Référence', get: () => ref.visible, set: (v) => this.change(() => { ref.visible = v; }) },
+        { type: 'range', label: 'Opacité réf.', min: 0, max: 1, step: 0.05, get: () => ref.alpha, set: (v) => this.change(() => { ref.alpha = v; }) },
+        { type: 'number', label: 'Échelle réf.', step: 0.05, get: () => ref.scale, set: (v) => this.change(() => { ref.scale = v; }) },
+        { type: 'number', label: 'X réf.', step: 1, get: () => ref.x, set: (v) => this.change(() => { ref.x = v; }) },
+        { type: 'number', label: 'Y réf.', step: 1, get: () => ref.y, set: (v) => this.change(() => { ref.y = v; }) },
+        { type: 'button', label: '', text: () => 'Retirer l\'image de référence', onClick: () => this.change(() => { sk.reference = null; }) },
+      );
+    }
+    out.push({ title: 'Squelette', rows: skel });
+
+    if (kind === 'bone') out.push({ title: 'Os', rows: this.boneRows(editor.selected) });
+    if (kind === 'slot') out.push({ title: 'Slot', rows: this.slotRows(editor.selectedSlot) });
+    if (kind === 'attachment') {
+      out.push({ title: 'Image (pièce jointe région)', rows: this.attachmentRows(editor.selectedSlot, editor.attachment) });
+    }
+    return out;
+  }
+
+  boneRows(bone) {
+    const sk = this.editor.skeleton;
+    const num = (key, label, step, unit, min) => ({
+      type: 'number', label, step, unit,
+      get: () => bone[key],
+      set: (v) => this.change(() => { bone[key] = min !== undefined ? Math.max(min, v) : v; }),
+    });
+    const rows = [
+      { type: 'text', label: 'Nom', get: () => bone.name, set: (v) => this.change(() => sk.renameBone(bone, v)) },
+      {
+        type: 'select', label: 'Parent', disabled: () => !bone.parent,
+        options: () => (bone.parent
+          ? sk.bones.filter((b) => b !== bone && !bone.isAncestorOf(b)).map((b) => [b.name, `${'  '.repeat(sk.depthOf(b))}${b.name}`])
+          : [['', '(aucun : racine)']]),
+        get: () => bone.parent?.name ?? '',
+        set: (v) => this.change(() => sk.reparent(bone, sk.findBone(v))),
+      },
+      num('length', 'Longueur', 1, '', 0),
+      num('x', 'X', 1),
+      num('y', 'Y', 1),
+      num('rotation', 'Rotation', 1, '°'),
+      num('scaleX', 'Échelle X', 0.05),
+      num('scaleY', 'Échelle Y', 0.05),
+      num('shearX', 'Cisaillement X', 1, '°'),
+      num('shearY', 'Cisaillement Y', 1, '°'),
+      {
+        type: 'select', label: 'Héritage', disabled: () => !bone.parent,
+        options: () => Object.entries(INHERIT_LABELS),
+        get: () => bone.inherit,
+        set: (v) => this.change(() => { bone.inherit = v; }),
+      },
+      { type: 'color', label: 'Couleur', get: () => bone.color, set: (v) => this.change(() => { bone.color = v; }) },
+      {
+        type: 'info',
+        text: () => `Monde : x ${round(bone.worldX)}, y ${round(bone.worldY)}, rotation ${round(bone.worldRotationX)}°, `
+          + `échelle ${round(bone.worldScaleX, 3)} × ${round(bone.worldScaleY, 3)}`,
+      },
+    ];
+    if (sk.slotsOf(bone).length === 0) {
+      rows.push({ type: 'button', label: '', text: () => 'Ajouter un slot vide à cet os', onClick: () => this.actions.addSlot(bone) });
+    }
+    return rows;
+  }
+
+  slotRows(slot) {
+    const sk = this.editor.skeleton;
+    return [
+      { type: 'text', label: 'Nom', get: () => slot.name, set: (v) => this.change(() => sk.renameSlot(slot, v)) },
+      {
+        type: 'select', label: 'Os',
+        options: () => sk.bones.map((b) => [b.name, `${'  '.repeat(sk.depthOf(b))}${b.name}`]),
+        get: () => slot.bone.name,
+        set: (v) => this.change(() => sk.setSlotBone(slot, sk.findBone(v))),
+      },
+      {
+        type: 'select', label: 'Visible',
+        options: () => [['', '(aucune)'], ...[...sk.defaultSkin.attachmentsOf(slot.name).keys()].map((n) => [n, n])],
+        get: () => slot.attachment ?? '',
+        set: (v) => this.change(() => { slot.attachment = v || null; }),
+      },
+      ...colorRows(slot, 'color', (fn) => this.change(fn)),
+      {
+        type: 'checkbox', label: 'Teinte sombre', get: () => Boolean(slot.dark),
+        set: (v) => this.change(() => { slot.dark = v ? '#000000' : null; }),
+      },
+      {
+        type: 'color', label: 'Couleur sombre', disabled: () => !slot.dark,
+        get: () => slot.dark ?? '#000000', set: (v) => this.change(() => { slot.dark = v; }),
+      },
+      {
+        type: 'select', label: 'Fusion', options: () => Object.entries(BLEND_LABELS),
+        get: () => slot.blend, set: (v) => this.change(() => { slot.blend = v; }),
+      },
+      { type: 'button', label: '', text: () => 'Envoyer tout devant', onClick: () => this.change(() => sk.moveSlot(slot, sk.slots.length - 1)) },
+      { type: 'button', label: '', text: () => 'Envoyer tout au fond', onClick: () => this.change(() => sk.moveSlot(slot, 0)) },
+    ];
+  }
+
+  attachmentRows(slot, att) {
+    const sk = this.editor.skeleton;
+    const editor = this.editor;
+    const num = (key, label, step, unit, min) => ({
+      type: 'number', label, step, unit,
+      get: () => att[key],
+      set: (v) => this.change(() => { att[key] = min !== undefined ? Math.max(min, v) : v; }),
+    });
+    return [
+      {
+        type: 'text', label: 'Nom', get: () => att.name,
+        set: (v) => this.change(() => {
+          sk.renameAttachment(slot, att.name, v);
+          editor.selectedAttachment = v.trim();
+        }),
+      },
+      {
+        type: 'select', label: 'Image',
+        options: () => {
+          const list = this.actions.imagePaths().map((p) => [p, p]);
+          if (!list.some(([p]) => p === att.imagePath)) list.unshift([att.imagePath, `${att.imagePath} (manquante)`]);
+          return list;
+        },
+        get: () => att.imagePath,
+        set: (v) => this.change(() => { att.path = v === att.name ? null : v; }),
+      },
+      num('x', 'X', 1),
+      num('y', 'Y', 1),
+      num('rotation', 'Rotation', 1, '°'),
+      num('scaleX', 'Échelle X', 0.05),
+      num('scaleY', 'Échelle Y', 0.05),
+      num('width', 'Largeur', 1, 'px', 1),
+      num('height', 'Hauteur', 1, 'px', 1),
+      {
+        type: 'button', label: '', text: () => 'Taille de l\'image d\'origine',
+        onClick: () => {
+          const size = this.actions.imageSize(att.imagePath);
+          if (!size) {
+            this.notify('Image introuvable dans le dossier d\'images.');
+            return;
+          }
+          this.change(() => {
+            att.width = size.width;
+            att.height = size.height;
+          });
+        },
+      },
+      ...colorRows(att, 'color', (fn) => this.change(fn)),
+      { type: 'info', text: () => `Slot « ${slot.name} », os « ${slot.bone.name} »` },
+    ];
+  }
+
+  // --- Construction et rafraîchissement du formulaire -----------------------------------
+
+  refresh() {
+    const editor = this.editor;
+    const sk = editor.skeleton;
+    const sig = [
+      editor.selectionKind, editor.selected?.name, editor.selectedSlot?.name, editor.selectedAttachment,
+      Boolean(sk.reference), sk.slotsOf(editor.selected).length === 0, sk,
+    ];
+    const changed = !this.signature || sig.some((v, i) => v !== this.signature[i]);
+    if (changed) this.build();
+    this.signature = sig;
+    this.refreshValues();
   }
 
   build() {
     const form = document.createElement('form');
     form.className = 'props';
     form.addEventListener('submit', (e) => e.preventDefault());
-
-    this.fields = {};
-
-    const row = (labelText, input, unit) => {
-      const lab = document.createElement('label');
-      lab.className = 'prop-row';
-      const span = document.createElement('span');
-      span.textContent = labelText;
-      lab.append(span, input);
-      if (unit) {
-        const u = document.createElement('em');
-        u.textContent = unit;
-        lab.appendChild(u);
-      }
-      form.appendChild(lab);
-    };
-
-    const skName = document.createElement('input');
-    skName.type = 'text';
-    skName.addEventListener('change', () => {
-      const v = skName.value.trim() || 'squelette';
-      this.editor.apply(() => {
-        this.editor.skeleton.name = v;
-      });
-    });
-    this.fields.skeletonName = skName;
-    row('Squelette', skName);
-
-    const sep = document.createElement('h3');
-    sep.textContent = 'Os';
-    form.appendChild(sep);
-
-    const name = document.createElement('input');
-    name.type = 'text';
-    name.addEventListener('change', () => this.set((b, sk) => sk.renameBone(b, name.value)));
-    this.fields.name = name;
-    row('Nom', name);
-
-    const parent = document.createElement('select');
-    parent.addEventListener('change', () => this.set((b, sk) => sk.reparent(b, sk.findBone(parent.value))));
-    this.fields.parent = parent;
-    row('Parent', parent);
-
-    for (const f of NUMBER_FIELDS) {
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.step = String(f.step);
-      if (f.min !== undefined) input.min = String(f.min);
-      input.addEventListener('change', () => {
-        const v = Number(input.value);
-        if (input.value === '' || !Number.isFinite(v)) {
-          this.refresh();
-          return;
-        }
-        this.set((b) => {
-          b[f.key] = f.min !== undefined ? Math.max(f.min, v) : v;
-        });
-      });
-      this.fields[f.key] = input;
-      row(f.label, input, f.unit);
+    this.rows = [];
+    for (const section of this.sections()) {
+      const h = document.createElement('h3');
+      h.textContent = section.title;
+      form.appendChild(h);
+      for (const def of section.rows) this.rows.push(buildRow(form, def));
     }
-
-    const inherit = document.createElement('select');
-    for (const [value, text] of Object.entries(INHERIT_LABELS)) {
-      inherit.appendChild(new Option(text, value));
-    }
-    inherit.addEventListener('change', () => this.set((b) => {
-      b.inherit = inherit.value;
-    }));
-    this.fields.inherit = inherit;
-    row('Héritage', inherit);
-
-    const color = document.createElement('input');
-    color.type = 'color';
-    color.addEventListener('change', () => this.set((b) => {
-      b.color = color.value;
-    }));
-    this.fields.color = color;
-    row('Couleur', color);
-
-    const world = document.createElement('p');
-    world.className = 'world-info';
-    form.appendChild(world);
-    this.worldInfo = world;
-
     this.host.replaceChildren(form);
   }
 
-  set(fn) {
-    const bone = this.editor.selected;
-    if (!bone) return;
-    try {
-      this.editor.apply(() => fn(bone, this.editor.skeleton));
-    } catch (err) {
-      this.notify(err.message);
-      this.refresh();
-    }
-  }
-
-  refresh() {
-    const bone = this.editor.selected;
-    const sk = this.editor.skeleton;
-    const f = this.fields;
+  refreshValues() {
     const active = document.activeElement;
-    const put = (input, value) => {
-      if (input !== active) input.value = value;
-    };
-
-    put(f.skeletonName, sk.name);
-    const disabled = !bone;
-    for (const input of Object.values(f)) {
-      if (input !== f.skeletonName) input.disabled = disabled;
-    }
-    if (!bone) return;
-
-    put(f.name, bone.name);
-    f.parent.replaceChildren();
-    if (!bone.parent) {
-      f.parent.appendChild(new Option('(aucun : racine)', ''));
-      f.parent.disabled = true;
-    } else {
-      for (const b of sk.bones) {
-        if (b === bone || bone.isAncestorOf(b)) continue;
-        f.parent.appendChild(new Option(`${'  '.repeat(sk.depthOf(b))}${b.name}`, b.name));
+    for (const { def, input, extra } of this.rows) {
+      if (def.disabled && input) input.disabled = def.disabled();
+      if (def.type === 'info') {
+        input.textContent = def.text();
+        continue;
       }
-      f.parent.value = bone.parent.name;
+      if (def.type === 'button') {
+        input.textContent = def.text();
+        continue;
+      }
+      if (input === active) continue;
+      const v = def.get();
+      if (def.type === 'checkbox') input.checked = v;
+      else if (def.type === 'number') input.value = round(v, def.step < 1 ? 4 : 2);
+      else if (def.type === 'select') {
+        input.replaceChildren(...def.options().map(([value, text]) => new Option(text, value)));
+        input.value = v;
+      } else if (def.type === 'range') {
+        input.value = v;
+        if (extra) extra.textContent = `${Math.round(v * 100)} %`;
+      } else input.value = v;
     }
-    for (const nf of NUMBER_FIELDS) put(f[nf.key], round(bone[nf.key], nf.step < 1 ? 4 : 2));
-    put(f.inherit, bone.inherit);
-    put(f.color, bone.color);
-    f.inherit.disabled = !bone.parent;
-
-    this.worldInfo.textContent =
-      `Monde : x ${round(bone.worldX)}, y ${round(bone.worldY)}, ` +
-      `rotation ${round(bone.worldRotationX)}°, échelle ${round(bone.worldScaleX, 3)} × ${round(bone.worldScaleY, 3)}`;
   }
+}
+
+// Deux lignes pour une couleur « #rrggbbaa » : la teinte et l'opacité.
+function colorRows(obj, key, change) {
+  return [
+    {
+      type: 'color', label: 'Teinte', get: () => splitAlpha(obj[key]).rgb,
+      set: (v) => change(() => { obj[key] = joinAlpha(v, splitAlpha(obj[key]).alpha); }),
+    },
+    {
+      type: 'range', label: 'Opacité', min: 0, max: 1, step: 0.01, get: () => splitAlpha(obj[key]).alpha,
+      set: (v) => change(() => { obj[key] = joinAlpha(splitAlpha(obj[key]).rgb, v); }),
+    },
+  ];
+}
+
+function buildRow(form, def) {
+  if (def.type === 'info') {
+    const p = document.createElement('p');
+    p.className = 'world-info';
+    form.appendChild(p);
+    return { def, input: p };
+  }
+  const lab = document.createElement(def.type === 'button' ? 'div' : 'label');
+  lab.className = 'prop-row';
+  const span = document.createElement('span');
+  span.textContent = def.label;
+  lab.appendChild(span);
+  let input;
+  let extra = null;
+
+  switch (def.type) {
+    case 'button':
+      input = document.createElement('button');
+      input.type = 'button';
+      input.className = 'prop-button';
+      if (def.title) input.title = def.title;
+      input.addEventListener('click', def.onClick);
+      break;
+    case 'select':
+      input = document.createElement('select');
+      input.addEventListener('change', () => def.set(input.value));
+      break;
+    case 'checkbox':
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.addEventListener('change', () => def.set(input.checked));
+      break;
+    case 'color':
+      input = document.createElement('input');
+      input.type = 'color';
+      input.addEventListener('change', () => def.set(input.value));
+      break;
+    case 'range':
+      input = document.createElement('input');
+      input.type = 'range';
+      input.min = String(def.min);
+      input.max = String(def.max);
+      input.step = String(def.step);
+      extra = document.createElement('em');
+      input.addEventListener('input', () => {
+        extra.textContent = `${Math.round(Number(input.value) * 100)} %`;
+      });
+      input.addEventListener('change', () => def.set(Number(input.value)));
+      break;
+    case 'number':
+      input = document.createElement('input');
+      input.type = 'number';
+      input.step = String(def.step);
+      input.addEventListener('change', () => {
+        const v = Number(input.value);
+        if (input.value === '' || !Number.isFinite(v)) {
+          input.value = round(def.get(), 2);
+          return;
+        }
+        def.set(v);
+      });
+      if (def.unit) {
+        extra = document.createElement('em');
+        extra.textContent = def.unit;
+      }
+      break;
+    default:
+      input = document.createElement('input');
+      input.type = 'text';
+      input.addEventListener('change', () => def.set(input.value));
+  }
+  lab.appendChild(input);
+  if (extra) lab.appendChild(extra);
+  form.appendChild(lab);
+  return { def, input, extra };
 }

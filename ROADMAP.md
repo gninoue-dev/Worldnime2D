@@ -17,16 +17,16 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Format de projet `.wn2d`, ouverture par double-clic
 - [x] Installeurs Windows (NSIS) et Linux (AppImage, .deb)
 
-## v0.2 — Images, slots et ordre d'affichage
+## v0.2 — Images, slots et ordre d'affichage ✅
 
-- [ ] Import d'images PNG (une par une ou un dossier entier)
-- [ ] Slots : un slot par os, plusieurs pièces jointes par slot
-- [ ] Pièce jointe « région » (image) : position, rotation, échelle, taille
-- [ ] Ordre d'affichage (draw order) et réordonnancement
-- [ ] Couleur et transparence des slots, couleur sombre (« tint black »)
-- [ ] Modes de fusion : normal, additif, produit, écran
-- [ ] Import d'un fichier PSD ou ORA découpé en calques (Krita, Photoshop, GIMP)
-- [ ] Fond de référence (image derrière le personnage)
+- [x] Import d'images PNG, JPG et WebP depuis un dossier (sous-dossiers compris), surveillé en continu
+- [x] Slots : un ou plusieurs slots par os, plusieurs pièces jointes par slot
+- [x] Pièce jointe « région » (image) : position, rotation, échelle, taille
+- [x] Ordre d'affichage (draw order) et réordonnancement par glisser-déposer
+- [x] Couleur et transparence des slots et des images, couleur sombre (« tint black »)
+- [x] Modes de fusion : normal, additif, produit, écran
+- [x] Import d'un fichier PSD ou ORA découpé en calques (Krita, Photoshop, GIMP)
+- [x] Fond de référence (image derrière le personnage)
 
 ## v0.3 — Animation (mode Animation)
 

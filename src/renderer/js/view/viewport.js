@@ -1,11 +1,15 @@
-// Zone de dessin : affiche le squelette avec PixiJS et gère la souris (outils, zoom, déplacement de la vue).
+// Zone de dessin : affiche le squelette et ses images avec PixiJS, et gère la souris
+// (outils, zoom, déplacement de la vue, dépôt d'images).
 //
-// Monde : Y vers le haut. Écran : Y vers le bas. La caméra fait la conversion.
+// Monde : Y vers le haut. Écran : Y vers le bas. Le conteneur « world » fait la conversion
+// pour les images ; les os et les repères sont dessinés directement en pixels écran.
 
 import 'pixi.js/unsafe-eval';
-import { Application, Container, Graphics, Text } from 'pixi.js';
+import { Application, Container, Graphics, Sprite, Text } from 'pixi.js';
 import { TOOLS } from '../editor/editor.js';
 import { atan2Deg, wrapDeg, distToSegment } from '../model/math.js';
+import { RegionAttachment, quadContains } from '../model/attachment.js';
+import { AttachmentsView } from './attachments.js';
 
 const COLORS = {
   background: 0x262626,
@@ -17,30 +21,44 @@ const COLORS = {
   hover: 0xffffff,
   outline: 0x111111,
   preview: 0xffd54f,
+  attachment: 0xffb74d,
 };
 
 const HIT_RADIUS = 7;
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 40;
 const SNAP_DEG = 15;
+// Opacité minimale (0 à 255) pour qu'un clic sur une image la sélectionne.
+const ALPHA_HIT = 16;
 
 function hexToNumber(hex) {
-  return parseInt(hex.slice(1), 16);
+  return parseInt(hex.slice(1, 7), 16);
+}
+
+function sameHit(a, b) {
+  if (!a || !b) return a === b;
+  if (a.kind !== b.kind) return false;
+  return a.kind === 'bone' ? a.bone === b.bone : a.slot === b.slot && a.name === b.name;
 }
 
 export class Viewport {
-  constructor(editor, host, onStatus) {
+  constructor(editor, host, library, onStatus) {
     this.editor = editor;
     this.host = host;
+    this.library = library;
     this.onStatus = onStatus;
     this.zoom = 1;
     this.offsetX = 0;
     this.offsetY = 0;
     this.showNames = true;
+    this.showBones = true;
     this.hover = null;
     this.drag = null;
     this.spaceDown = false;
     this.mouseWorld = { x: 0, y: 0 };
+    this.reference = { path: null, texture: null };
+    // Fonction appelée quand on dépose une image du panneau Images sur la vue.
+    this.onDropImage = null;
   }
 
   async init() {
@@ -58,16 +76,23 @@ export class Viewport {
     this.canvas.tabIndex = 0;
 
     this.grid = new Graphics();
+    this.world = new Container();
+    this.referenceSprite = new Sprite();
+    this.referenceSprite.anchor.set(0.5);
+    this.referenceSprite.visible = false;
+    this.attachments = new AttachmentsView(this.library);
+    this.world.addChild(this.referenceSprite, this.attachments.container);
     this.bonesLayer = new Graphics();
     this.overlay = new Graphics();
     this.labels = new Container();
-    this.app.stage.addChild(this.grid, this.bonesLayer, this.overlay, this.labels);
+    this.app.stage.addChild(this.grid, this.world, this.bonesLayer, this.overlay, this.labels);
     this.labelPool = [];
 
     this.centerView();
     this.bindEvents();
     new ResizeObserver(() => this.render()).observe(this.host);
     this.editor.addEventListener('change', () => this.render());
+    this.library.addEventListener('change', () => this.render());
     this.render();
   }
 
@@ -96,7 +121,7 @@ export class Viewport {
     this.render();
   }
 
-  // Cadre tout le squelette à l'écran.
+  // Cadre tout le squelette (os et images) à l'écran.
   frameAll() {
     const sk = this.editor.skeleton;
     sk.updateWorldTransform();
@@ -104,17 +129,25 @@ export class Viewport {
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
+    const add = (x, y) => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    };
     for (const b of sk.bones) {
-      for (const [x, y] of [[b.worldX, b.worldY], [b.tipX, b.tipY]]) {
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
+      add(b.worldX, b.worldY);
+      add(b.tipX, b.tipY);
+    }
+    for (const slot of sk.slots) {
+      const att = sk.visibleAttachment(slot);
+      if (!(att instanceof RegionAttachment)) continue;
+      const v = att.worldVertices(slot.bone);
+      for (let i = 0; i < 8; i += 2) add(v[i], v[i + 1]);
     }
     const w = Math.max(maxX - minX, 100);
     const h = Math.max(maxY - minY, 100);
-    this.zoom = clampZoom(Math.min(this.width / (w * 1.4), this.height / (h * 1.4)));
+    this.zoom = clampZoom(Math.min(this.width / (w * 1.25), this.height / (h * 1.25)));
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     this.offsetX = this.width / 2 - cx * this.zoom;
@@ -130,16 +163,44 @@ export class Viewport {
     this.render();
   }
 
+  // --- Image de référence ----------------------------------------------------------
+
+  setReferenceTexture(path, texture) {
+    if (this.reference.texture && this.reference.texture !== texture) this.reference.texture.destroy(true);
+    this.reference = { path, texture };
+    this.render();
+  }
+
   // --- Dessin ----------------------------------------------------------------------------
 
   render() {
     if (!this.app) return;
     const sk = this.editor.skeleton;
     sk.updateWorldTransform();
+    this.world.position.set(this.offsetX, this.offsetY);
+    this.world.scale.set(this.zoom, -this.zoom);
     this.drawGrid();
+    this.drawReference();
+    this.attachments.update(sk);
     this.drawBones();
     this.drawOverlay();
     this.reportStatus();
+  }
+
+  drawReference() {
+    const ref = this.editor.skeleton.reference;
+    const s = this.referenceSprite;
+    const tex = this.reference.texture;
+    if (!ref || !ref.visible || !tex) {
+      s.visible = false;
+      return;
+    }
+    s.texture = tex;
+    s.visible = true;
+    s.position.set(ref.x, ref.y);
+    // Le monde a son Y vers le haut : on retourne l'image pour qu'elle s'affiche à l'endroit.
+    s.scale.set(ref.scale, -ref.scale);
+    s.alpha = ref.alpha;
   }
 
   drawGrid() {
@@ -177,12 +238,15 @@ export class Viewport {
     const g = this.bonesLayer;
     g.clear();
     for (const l of this.labelPool) l.visible = false;
+    if (!this.showBones) return;
     const sk = this.editor.skeleton;
+    const editor = this.editor;
     let labelIndex = 0;
 
     for (const bone of sk.bones) {
-      const selected = bone === this.editor.selected;
-      const hovered = bone === this.hover && !selected;
+      const selected = bone === editor.selected && editor.selectionKind === 'bone';
+      const context = bone === editor.selected && !selected;
+      const hovered = this.hover?.kind === 'bone' && this.hover.bone === bone && !selected;
       const color = selected ? COLORS.selected : hovered ? COLORS.hover : hexToNumber(bone.color);
       const o = this.toScreen(bone.worldX, bone.worldY);
       const t = this.toScreen(bone.tipX, bone.tipY);
@@ -196,7 +260,8 @@ export class Viewport {
         const bx = o.x + ux * Math.min(lenPx * 0.15, 24);
         const by = o.y + uy * Math.min(lenPx * 0.15, 24);
         const pts = [o.x, o.y, bx - uy * width, by + ux * width, t.x, t.y, bx + uy * width, by - ux * width];
-        g.poly(pts).fill({ color, alpha: selected ? 0.55 : 0.4 }).stroke({ width: selected ? 2 : 1.25, color });
+        g.poly(pts).fill({ color, alpha: selected ? 0.55 : 0.4 })
+          .stroke({ width: selected || context ? 2 : 1.25, color: context ? COLORS.selected : color });
         g.circle(o.x, o.y, Math.min(width * 0.8, 6)).fill({ color: COLORS.outline }).stroke({ width: 1.5, color });
       } else {
         // Os de longueur nulle : un cercle barré.
@@ -225,9 +290,35 @@ export class Viewport {
     return this.labelPool[i];
   }
 
+  // Contour d'une image à l'écran.
+  strokeAttachment(g, slot, att, color, width) {
+    const v = att.worldVertices(slot.bone);
+    const pts = [];
+    for (let i = 0; i < 8; i += 2) {
+      const s = this.toScreen(v[i], v[i + 1]);
+      pts.push(s.x, s.y);
+    }
+    g.poly(pts).stroke({ width, color });
+  }
+
   drawOverlay() {
     const g = this.overlay;
     g.clear();
+    const editor = this.editor;
+    const sk = editor.skeleton;
+
+    // Images : contour de l'image survolée, de la sélection, et des images du slot sélectionné.
+    if (this.hover?.kind === 'attachment') {
+      const att = sk.getAttachment(this.hover.slot, this.hover.name);
+      if (att) this.strokeAttachment(g, this.hover.slot, att, COLORS.hover, 1);
+    }
+    if (editor.selectedSlot) {
+      const att = editor.attachment ?? sk.visibleAttachment(editor.selectedSlot);
+      if (att instanceof RegionAttachment) {
+        this.strokeAttachment(g, editor.selectedSlot, att, editor.attachment ? COLORS.selected : COLORS.attachment, 2);
+      }
+    }
+
     const d = this.drag;
     if (d?.kind === 'create') {
       const a = this.toScreen(d.start.x, d.start.y);
@@ -235,12 +326,13 @@ export class Viewport {
       g.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ width: 2, color: COLORS.preview });
       g.circle(a.x, a.y, 5).stroke({ width: 2, color: COLORS.preview });
     }
-    // Repère de l'os sélectionné pendant une transformation.
-    const bone = this.editor.selected;
-    if (bone && d && d.kind !== 'create' && d.kind !== 'pan') {
-      const o = this.toScreen(bone.worldX, bone.worldY);
-      const ax = this.toScreen(bone.worldX + bone.a * 40 / this.zoom, bone.worldY + bone.c * 40 / this.zoom);
-      const ay = this.toScreen(bone.worldX + bone.b * 40 / this.zoom, bone.worldY + bone.d * 40 / this.zoom);
+    // Repère de l'élément transformé pendant un geste.
+    if (d?.target) {
+      const f = d.target.frame();
+      const o = this.toScreen(f.x, f.y);
+      const len = 40 / this.zoom;
+      const ax = this.toScreen(f.x + f.ax * len, f.y + f.ay * len);
+      const ay = this.toScreen(f.x + f.bx * len, f.y + f.by * len);
       g.moveTo(o.x, o.y).lineTo(ax.x, ax.y).stroke({ width: 2, color: 0xe57373 });
       g.moveTo(o.x, o.y).lineTo(ay.x, ay.y).stroke({ width: 2, color: 0x81c784 });
     }
@@ -248,12 +340,16 @@ export class Viewport {
 
   reportStatus() {
     const m = this.mouseWorld;
-    this.onStatus?.({ zoom: this.zoom, x: m.x, y: m.y, hover: this.hover?.name ?? null });
+    const h = this.hover;
+    const hoverName = h ? (h.kind === 'bone' ? h.bone.name : `${h.slot.name} / ${h.name}`) : null;
+    this.onStatus?.({ zoom: this.zoom, x: m.x, y: m.y, hover: hoverName });
   }
 
   // --- Sélection à la souris ---------------------------------------------------
 
-  hitTest(sx, sy) {
+  // Os sous le pointeur (coordonnées écran), ou null.
+  hitBone(sx, sy) {
+    if (!this.showBones) return null;
     let best = null;
     let bestDist = HIT_RADIUS;
     const bones = this.editor.skeleton.bones;
@@ -270,6 +366,37 @@ export class Viewport {
       }
     }
     return best;
+  }
+
+  // Image visible sous le pointeur (la plus en avant, sur un pixel non transparent), ou null.
+  hitAttachment(sx, sy) {
+    if (!this.attachments.visible) return null;
+    const sk = this.editor.skeleton;
+    const w = this.toWorld(sx, sy);
+    for (let i = sk.slots.length - 1; i >= 0; i--) {
+      const slot = sk.slots[i];
+      const att = sk.visibleAttachment(slot);
+      if (!(att instanceof RegionAttachment)) continue;
+      const v = att.worldVertices(slot.bone);
+      if (!quadContains(v, w.x, w.y)) continue;
+      const uv = attachmentUV(slot.bone, att, w);
+      if (this.library.get(att.imagePath) && this.library.alphaAt(att.imagePath, uv.u, uv.v) < ALPHA_HIT) continue;
+      return { kind: 'attachment', slot, name: att.name };
+    }
+    return null;
+  }
+
+  // Les os passent avant les images, comme dans les éditeurs du genre.
+  hitTest(sx, sy) {
+    const bone = this.hitBone(sx, sy);
+    if (bone) return { kind: 'bone', bone };
+    return this.hitAttachment(sx, sy);
+  }
+
+  selectHit(hit) {
+    if (!hit) return;
+    if (hit.kind === 'bone') this.editor.select(hit.bone);
+    else this.editor.selectAttachment(hit.slot, hit.name);
   }
 
   // --- Événements -------------------------------------------------------------------
@@ -291,6 +418,20 @@ export class Viewport {
         this.hover = null;
         this.render();
       }
+    });
+    // Dépôt d'une image venue du panneau Images.
+    c.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/x-wn2d-image')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+    c.addEventListener('drop', (e) => {
+      const path = e.dataTransfer.getData('application/x-wn2d-image');
+      if (!path) return;
+      e.preventDefault();
+      const p = this.local(e);
+      this.onDropImage?.(path, this.toWorld(p.x, p.y));
     });
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && !isTyping(e)) this.spaceDown = true;
@@ -323,39 +464,39 @@ export class Viewport {
     if (e.button !== 0) return;
 
     const editor = this.editor;
-    const hit = this.hitTest(p.x, p.y);
 
     if (editor.tool === TOOLS.select) {
-      if (hit) editor.select(hit);
+      this.selectHit(this.hitTest(p.x, p.y));
       return;
     }
 
     if (editor.tool === TOOLS.create) {
       // Glisser depuis un os crée un enfant de cet os ; un simple clic dessus le sélectionne.
+      const hit = this.hitBone(p.x, p.y);
       this.drag = { kind: 'create', start: w, end: w, hit, parent: hit ?? editor.selected ?? editor.skeleton.root };
       this.render();
       return;
     }
 
-    // Outils de transformation : un clic sur un os le sélectionne, puis le glisser le transforme.
-    if (hit) editor.select(hit);
-    const bone = editor.selected;
-    if (!bone) return;
+    // Outils de transformation : un clic sélectionne, puis le glisser transforme la sélection.
+    this.selectHit(this.hitTest(p.x, p.y));
+    const target = editor.selectionKind === 'attachment'
+      ? attachmentTarget(editor.selectedSlot, editor.attachment)
+      : editor.selectionKind === 'bone' ? boneTarget(editor.selected) : null;
+    if (!target) return;
+    if (editor.tool === TOOLS.shear && !target.canShear) return;
     editor.begin();
+    const f = target.frame();
     this.drag = {
       kind: editor.tool,
-      bone,
+      target,
       start: w,
-      startAngle: atan2Deg(w.y - bone.worldY, w.x - bone.worldX),
-      startWorld: { x: bone.worldX, y: bone.worldY },
-      initial: {
-        x: bone.x, y: bone.y, rotation: bone.rotation,
-        scaleX: bone.scaleX, scaleY: bone.scaleY, shearX: bone.shearX, shearY: bone.shearY,
-      },
-      // Repère de l'os au début (rotation seule) pour l'outil Échelle.
-      axisAngle: bone.worldRotationX,
-      parentFlip: bone.parent ? Math.sign(bone.parent.a * bone.parent.d - bone.parent.b * bone.parent.c) || 1 : 1,
+      startAngle: atan2Deg(w.y - f.y, w.x - f.x),
+      startWorld: { x: f.x, y: f.y },
+      initial: target.save(),
+      axisAngle: atan2Deg(f.ay, f.ax),
     };
+    this.render();
   }
 
   onMove(e) {
@@ -366,7 +507,7 @@ export class Viewport {
 
     if (!d) {
       const hit = this.hitTest(p.x, p.y);
-      if (hit !== this.hover) {
+      if (!sameHit(hit, this.hover)) {
         this.hover = hit;
         this.render();
       } else {
@@ -388,14 +529,14 @@ export class Viewport {
       return;
     }
 
-    const bone = d.bone;
+    const t = d.target;
     const init = d.initial;
     switch (d.kind) {
       case TOOLS.rotate: {
-        const angle = atan2Deg(w.y - bone.worldY, w.x - bone.worldX);
-        let r = init.rotation + wrapDeg(angle - d.startAngle) * d.parentFlip;
+        const angle = atan2Deg(w.y - d.startWorld.y, w.x - d.startWorld.x);
+        let r = init.rotation + wrapDeg(angle - d.startAngle) * t.flip;
         if (e.shiftKey) r = Math.round(r / SNAP_DEG) * SNAP_DEG;
-        bone.rotation = r;
+        t.setRotation(r);
         break;
       }
       case TOOLS.translate: {
@@ -405,9 +546,7 @@ export class Viewport {
           if (Math.abs(dx) > Math.abs(dy)) dy = 0;
           else dx = 0;
         }
-        const local = bone.parentWorldToLocal(d.startWorld.x + dx, d.startWorld.y + dy);
-        bone.x = local.x;
-        bone.y = local.y;
+        t.setWorldPosition(d.startWorld.x + dx, d.startWorld.y + dy);
         break;
       }
       case TOOLS.scale: {
@@ -423,19 +562,20 @@ export class Viewport {
         if (e.shiftKey) {
           const r0 = Math.hypot(s0.x, s0.y);
           const f = r0 > minSpan ? Math.hypot(s1.x, s1.y) / r0 : 1;
-          bone.scaleX = init.scaleX * f;
-          bone.scaleY = init.scaleY * f;
+          t.setScale(init.scaleX * f, init.scaleY * f);
         } else {
-          bone.scaleX = Math.abs(s0.x) > minSpan ? init.scaleX * (s1.x / s0.x) : init.scaleX;
-          bone.scaleY = Math.abs(s0.y) > minSpan ? init.scaleY * (s1.y / s0.y) : init.scaleY;
+          t.setScale(
+            Math.abs(s0.x) > minSpan ? init.scaleX * (s1.x / s0.x) : init.scaleX,
+            Math.abs(s0.y) > minSpan ? init.scaleY * (s1.y / s0.y) : init.scaleY,
+          );
         }
         break;
       }
       case TOOLS.shear: {
         const angle = atan2Deg(w.y - d.startWorld.y, w.x - d.startWorld.x);
-        const delta = wrapDeg(angle - d.startAngle) * d.parentFlip;
-        if (e.shiftKey) bone.shearX = init.shearX + delta;
-        else bone.shearY = init.shearY + delta;
+        const delta = wrapDeg(angle - d.startAngle) * t.flip;
+        if (e.shiftKey) t.setShear(init.shearX + delta, init.shearY);
+        else t.setShear(init.shearX, init.shearY + delta);
         break;
       }
       default:
@@ -483,6 +623,8 @@ export class Viewport {
           bone.length = Math.hypot(d.end.x - d.start.x, d.end.y - d.start.y) / (bone.worldScaleX || 1);
         }
         editor.selected = bone;
+        editor.selectedSlot = null;
+        editor.selectedAttachment = null;
       });
       return;
     }
@@ -504,6 +646,90 @@ export class Viewport {
     this.app.renderer.render(this.app.stage);
     return this.app.canvas.toDataURL('image/png');
   }
+}
+
+// --- Cibles des outils de transformation ------------------------------------------------
+// Une cible donne son repère monde (frame) et sait appliquer rotation, position, échelle.
+
+function determinantSign(b) {
+  return b ? Math.sign(b.a * b.d - b.b * b.c) || 1 : 1;
+}
+
+function boneTarget(bone) {
+  if (!bone) return null;
+  return {
+    canShear: true,
+    flip: determinantSign(bone.parent),
+    frame: () => ({ x: bone.worldX, y: bone.worldY, ax: bone.a, ay: bone.c, bx: bone.b, by: bone.d }),
+    save: () => ({
+      rotation: bone.rotation, scaleX: bone.scaleX, scaleY: bone.scaleY, shearX: bone.shearX, shearY: bone.shearY,
+    }),
+    setRotation: (r) => {
+      bone.rotation = r;
+    },
+    setWorldPosition: (x, y) => {
+      const l = bone.parentWorldToLocal(x, y);
+      bone.x = l.x;
+      bone.y = l.y;
+    },
+    setScale: (sx, sy) => {
+      bone.scaleX = sx;
+      bone.scaleY = sy;
+    },
+    setShear: (shx, shy) => {
+      bone.shearX = shx;
+      bone.shearY = shy;
+    },
+  };
+}
+
+function attachmentTarget(slot, att) {
+  if (!slot || !(att instanceof RegionAttachment)) return null;
+  const bone = slot.bone;
+  return {
+    canShear: false,
+    flip: determinantSign(bone),
+    frame: () => {
+      const c = bone.localToWorld(att.x, att.y);
+      const r = (att.rotation * Math.PI) / 180;
+      const ux = Math.cos(r);
+      const uy = Math.sin(r);
+      // Axes de l'image dans le repère de l'os, puis dans le monde.
+      return {
+        x: c.x,
+        y: c.y,
+        ax: bone.a * ux + bone.b * uy,
+        ay: bone.c * ux + bone.d * uy,
+        bx: bone.a * -uy + bone.b * ux,
+        by: bone.c * -uy + bone.d * ux,
+      };
+    },
+    save: () => ({ rotation: att.rotation, scaleX: att.scaleX, scaleY: att.scaleY }),
+    setRotation: (r) => {
+      att.rotation = r;
+    },
+    setWorldPosition: (x, y) => {
+      const l = bone.worldToLocal(x, y);
+      att.x = l.x;
+      att.y = l.y;
+    },
+    setScale: (sx, sy) => {
+      att.scaleX = sx;
+      att.scaleY = sy;
+    },
+    setShear: () => {},
+  };
+}
+
+// Coordonnées (u, v) dans l'image du point monde w (u vers la droite, v vers le bas).
+function attachmentUV(bone, att, w) {
+  const l = bone.worldToLocal(w.x, w.y);
+  const r = (-att.rotation * Math.PI) / 180;
+  const dx = l.x - att.x;
+  const dy = l.y - att.y;
+  const px = (dx * Math.cos(r) - dy * Math.sin(r)) / (att.scaleX || 1);
+  const py = (dx * Math.sin(r) + dy * Math.cos(r)) / (att.scaleY || 1);
+  return { u: px / att.width + 0.5, v: 0.5 - py / att.height };
 }
 
 function clampZoom(z) {

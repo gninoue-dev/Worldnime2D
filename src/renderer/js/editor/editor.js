@@ -37,6 +37,8 @@ export class Editor extends EventTarget {
     this.skeleton = skeleton;
     this.skeleton.updateWorldTransform();
     this.selected = skeleton.root;
+    this.selectedSlot = null;
+    this.selectedAttachment = null;
     this.filePath = filePath;
     this.undoStack = [];
     this.redoStack = [];
@@ -68,13 +70,20 @@ export class Editor extends EventTarget {
     return JSON.stringify({
       project: serializeProject(this.skeleton),
       selected: this.selected?.name ?? null,
+      slot: this.selectedSlot?.name ?? null,
+      attachment: this.selectedAttachment,
     });
   }
 
   restore(state) {
-    const { project, selected } = JSON.parse(state);
+    const { project, selected, slot, attachment } = JSON.parse(state);
     this.skeleton = parseProject(JSON.stringify(project));
     this.selected = (selected && this.skeleton.findBone(selected)) || this.skeleton.root;
+    this.selectedSlot = (slot && this.skeleton.findSlot(slot)) || null;
+    this.selectedAttachment = this.selectedSlot && attachment && this.skeleton.getAttachment(this.selectedSlot, attachment)
+      ? attachment
+      : null;
+    if (this.selectedSlot) this.selected = this.selectedSlot.bone;
   }
 
   // Les modifications continues (glisser à la souris) ouvrent une transaction :
@@ -139,9 +148,38 @@ export class Editor extends EventTarget {
 
   // --- Sélection et outils ---------------------------------------------------
 
+  // Ce qui est sélectionné : 'bone', 'slot' ou 'attachment'.
+  get selectionKind() {
+    if (this.selectedSlot && this.selectedAttachment) return 'attachment';
+    if (this.selectedSlot) return 'slot';
+    return 'bone';
+  }
+
+  // La pièce jointe sélectionnée (objet), ou null.
+  get attachment() {
+    if (!this.selectedSlot || !this.selectedAttachment) return null;
+    return this.skeleton.getAttachment(this.selectedSlot, this.selectedAttachment);
+  }
+
   select(bone) {
-    if (this.selected === bone) return;
+    if (this.selected === bone && !this.selectedSlot) return;
     this.selected = bone;
+    this.selectedSlot = null;
+    this.selectedAttachment = null;
+    this.emit('select');
+  }
+
+  selectSlot(slot) {
+    this.selected = slot.bone;
+    this.selectedSlot = slot;
+    this.selectedAttachment = null;
+    this.emit('select');
+  }
+
+  selectAttachment(slot, name) {
+    this.selected = slot.bone;
+    this.selectedSlot = slot;
+    this.selectedAttachment = name;
     this.emit('select');
   }
 
@@ -153,27 +191,79 @@ export class Editor extends EventTarget {
 
   // --- Opérations sur les os ---------------------------------------------------
 
+  // Supprime ce qui est sélectionné (os avec ses descendants et ses slots, slot, ou pièce jointe).
   deleteSelected() {
+    const sk = this.skeleton;
+    const kind = this.selectionKind;
+    if (kind === 'attachment') {
+      const slot = this.selectedSlot;
+      const name = this.selectedAttachment;
+      this.apply(() => {
+        sk.removeAttachment(slot, name);
+        this.selectedAttachment = null;
+      });
+      return true;
+    }
+    if (kind === 'slot') {
+      const slot = this.selectedSlot;
+      this.apply(() => {
+        sk.removeSlot(slot);
+        this.selectedSlot = null;
+      });
+      return true;
+    }
     const bone = this.selected;
     if (!bone || !bone.parent) return false;
     const parent = bone.parent;
     this.apply(() => {
-      this.skeleton.removeBone(bone);
+      sk.removeBone(bone);
       this.selected = parent;
     });
     return true;
   }
 
-  // Duplique l'os sélectionné et ses descendants, sous le même parent.
+  // Copie un slot (et ses pièces jointes) sur un os, juste devant l'original dans l'ordre d'affichage.
+  copySlot(src, bone) {
+    const sk = this.skeleton;
+    const slot = sk.addSlot(sk.uniqueSlotName(src.name), bone, sk.slots.indexOf(src) + 1);
+    for (const k of ['color', 'dark', 'attachment', 'blend']) slot[k] = src[k];
+    for (const [name, att] of sk.defaultSkin.attachmentsOf(src.name)) sk.addAttachment(slot, att.copy(name));
+    return slot;
+  }
+
+  // Duplique la sélection : os (avec descendants et slots), slot, ou pièce jointe.
   duplicateSelected() {
+    const sk = this.skeleton;
+    const kind = this.selectionKind;
+    if (kind === 'attachment') {
+      const slot = this.selectedSlot;
+      const att = this.attachment;
+      this.apply(() => {
+        let name = `${att.name}2`;
+        for (let i = 3; sk.getAttachment(slot, name); i++) name = `${att.name}${i}`;
+        const copy = att.copy(name);
+        if (copy.path === null) copy.path = att.name;
+        sk.addAttachment(slot, copy);
+        this.selectedAttachment = name;
+      });
+      return true;
+    }
+    if (kind === 'slot') {
+      const src = this.selectedSlot;
+      this.apply(() => {
+        this.selectedSlot = this.copySlot(src, src.bone);
+      });
+      return true;
+    }
     const src = this.selected;
     if (!src || !src.parent) return false;
     this.apply(() => {
       const copy = (bone, parent) => {
-        const b = this.skeleton.addBone(this.skeleton.uniqueBoneName(bone.name), parent);
+        const b = sk.addBone(sk.uniqueBoneName(bone.name), parent);
         for (const k of ['length', 'x', 'y', 'rotation', 'scaleX', 'scaleY', 'shearX', 'shearY', 'inherit', 'color']) {
           b[k] = bone[k];
         }
+        for (const slot of sk.slotsOf(bone)) this.copySlot(slot, b);
         for (const c of [...bone.children]) copy(c, b);
         return b;
       };

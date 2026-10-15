@@ -1,7 +1,7 @@
 {
   "name": "worldnime2d",
   "productName": "Worldnime2D",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Éditeur d'animation 2D par squelette, libre et open source",
   "author": {
     "name": "Gninoue",
@@ -66,6 +66,7 @@
     }
   },
   "devDependencies": {
+    "ag-psd": "^31.0.3",
     "electron": "^44.7.2",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",

@@ -32,16 +32,22 @@
     <aside class="side">
       <section class="panel panel-tree">
         <h2>
-          <span>Arbre</span>
+          <span class="tabs" role="tablist">
+            <button type="button" class="tab" role="tab" data-tab="tree">Arbre</button>
+            <button type="button" class="tab" role="tab" data-tab="draworder">Ordre</button>
+            <button type="button" class="tab" role="tab" data-tab="images">Images</button>
+          </span>
           <span class="panel-actions">
             <button type="button" data-cmd="add-child" title="Ajouter un os enfant">＋</button>
             <button type="button" data-cmd="duplicate" title="Dupliquer (Ctrl+D)">⧉</button>
-            <button type="button" data-cmd="move-up" title="Monter">▲</button>
-            <button type="button" data-cmd="move-down" title="Descendre">▼</button>
+            <button type="button" data-cmd="move-up" title="Monter / avancer">▲</button>
+            <button type="button" data-cmd="move-down" title="Descendre / reculer">▼</button>
             <button type="button" data-cmd="delete" title="Supprimer (Suppr)">✕</button>
           </span>
         </h2>
-        <div class="panel-body" id="tree"></div>
+        <div class="panel-body" id="tree" role="tabpanel"></div>
+        <div class="panel-body" id="draworder" role="tabpanel" hidden></div>
+        <div class="panel-body" id="images" role="tabpanel" hidden></div>
       </section>
       <section class="panel panel-props">
         <h2><span>Propriétés</span></h2>
@@ -71,7 +77,12 @@
       <tr><td>Ctrl+Z / Ctrl+Y</td><td>Annuler / rétablir</td></tr>
       <tr><td>Ctrl+D / Suppr</td><td>Dupliquer / supprimer l'os sélectionné</td></tr>
       <tr><td>Double-clic dans l'arbre</td><td>Renommer</td></tr>
-      <tr><td>Glisser un os sur un autre dans l'arbre</td><td>Changer de parent</td></tr>
+      <tr><td>Glisser un os sur un autre dans l'arbre</td><td>Changer de parent (un slot glissé sur un os change d'os)</td></tr>
+      <tr><td>Clic sur une image</td><td>Sélectionner l'image ; les outils Rotation, Déplacement et Échelle la transforment</td></tr>
+      <tr><td>Onglet Images</td><td>Glisser une image sur la vue ou sur un os pour l'attacher (crée un slot)</td></tr>
+      <tr><td>Onglet Ordre</td><td>Glisser les slots pour changer l'ordre d'affichage (en haut = devant)</td></tr>
+      <tr><td>Ctrl+I</td><td>Importer un fichier à calques ORA (Krita, GIMP) ou PSD (Photoshop)</td></tr>
+      <tr><td>F5</td><td>Recharger les images (automatique quand un fichier change)</td></tr>
     </table>
     <form method="dialog"><button>Fermer</button></form>
   </dialog>
