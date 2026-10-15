@@ -9,13 +9,15 @@ import { BLEND_MODES } from './slot.js';
 import { RegionAttachment, ATTACHMENT_TYPES } from './attachment.js';
 import { WHITE, isRgb, isRgba } from './color.js';
 import { round } from './math.js';
+import { animationToJSON, animationFromJSON, EventData } from './animation.js';
 
 export const FORMAT_NAME = 'worldnime2d';
-export const FORMAT_VERSION = 2;
+export const FORMAT_VERSION = 3;
 export const FILE_EXTENSION = 'wn2d';
 
 export function serializeProject(skeleton, meta = {}) {
   const skel = { name: skeleton.name };
+  if (skeleton.fps !== 30) skel.fps = skeleton.fps;
   if (skeleton.images) skel.images = skeleton.images;
   if (skeleton.reference) {
     const r = skeleton.reference;
@@ -67,8 +69,19 @@ export function serializeProject(skeleton, meta = {}) {
     transform: [],
     path: [],
     physics: [],
-    events: {},
-    animations: {},
+    events: Object.fromEntries([...skeleton.events.values()].map((e) => {
+      const out = {};
+      if (e.int) out.int = e.int;
+      if (e.float) out.float = e.float;
+      if (e.string) out.string = e.string;
+      if (e.audio) {
+        out.audio = e.audio;
+        out.volume = e.volume;
+        out.balance = e.balance;
+      }
+      return [e.name, out];
+    })),
+    animations: Object.fromEntries(skeleton.animations.map((a) => [a.name, animationToJSON(a)])),
   };
 }
 
@@ -184,6 +197,25 @@ export function parseProject(text) {
   }
   for (const slot of skeleton.slots) {
     if (slot.attachment && !skeleton.getAttachment(slot, slot.attachment)) slot.attachment = null;
+  }
+
+  const fps = data.skeleton?.fps;
+  if (fps !== undefined) {
+    if (typeof fps !== 'number' || !(fps > 0 && fps <= 240)) throw new Error('Cadence (fps) invalide.');
+    skeleton.fps = fps;
+  }
+  for (const [name, ed] of Object.entries(data.events ?? {})) {
+    const e = new EventData(name);
+    e.int = num(ed.int, 0, `int (événement « ${name} »)`);
+    e.float = num(ed.float, 0, `float (événement « ${name} »)`);
+    e.string = str(ed.string, '', `string (événement « ${name} »)`);
+    e.audio = str(ed.audio, '', `audio (événement « ${name} »)`);
+    e.volume = num(ed.volume, 1, `volume (événement « ${name} »)`);
+    e.balance = num(ed.balance, 0, `balance (événement « ${name} »)`);
+    skeleton.events.set(name, e);
+  }
+  for (const [name, ad] of Object.entries(data.animations ?? {})) {
+    skeleton.animations.push(animationFromJSON(name, ad));
   }
 
   skeleton.updateWorldTransform();

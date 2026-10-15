@@ -57,6 +57,14 @@ export class PropertiesPanel {
     }
     out.push({ title: 'Squelette', rows: skel });
 
+    if (editor.animating) {
+      if (kind === 'bone') out.push({ title: 'Os — pose animée', rows: this.animBoneRows(editor.selected) });
+      if (kind === 'slot') out.push({ title: 'Slot — pose animée', rows: this.animSlotRows(editor.selectedSlot) });
+      if (kind === 'attachment') {
+        out.push({ title: 'Image', rows: [{ type: 'info', text: () => 'En mode Animation, on anime l\'os et le slot, pas l\'image elle-même. Repassez en mode Configuration pour la placer.' }] });
+      }
+      return out;
+    }
     if (kind === 'bone') out.push({ title: 'Os', rows: this.boneRows(editor.selected) });
     if (kind === 'slot') out.push({ title: 'Slot', rows: this.slotRows(editor.selectedSlot) });
     if (kind === 'attachment') {
@@ -107,6 +115,86 @@ export class PropertiesPanel {
       rows.push({ type: 'button', label: '', text: () => 'Ajouter un slot vide à cet os', onClick: () => this.actions.addSlot(bone) });
     }
     return rows;
+  }
+
+  // Mode Animation : valeurs de la pose courante ; toute modification pose une clé.
+  animBoneRows(bone) {
+    const ed = this.editor;
+    const p = bone.pose;
+    const num = (key, label, step, type, unit) => ({
+      type: 'number', label, step, unit,
+      key: { owner: 'bone', name: bone.name, type },
+      get: () => p[key],
+      set: (v) => this.change(() => {
+        p[key] = v;
+        ed.keyBone(bone, [type]);
+      }),
+    });
+    return [
+      { type: 'info', text: () => `« ${bone.name} », image ${ed.frame} — ◆ clé ici, ◇ animée ailleurs. Cliquer le losange pose la clé.` },
+      num('x', 'X', 1, 'translate'),
+      num('y', 'Y', 1, 'translate'),
+      num('rotation', 'Rotation', 1, 'rotate', '°'),
+      num('scaleX', 'Échelle X', 0.05, 'scale'),
+      num('scaleY', 'Échelle Y', 0.05, 'scale'),
+      num('shearX', 'Cisaillement X', 1, 'shear', '°'),
+      num('shearY', 'Cisaillement Y', 1, 'shear', '°'),
+      {
+        type: 'button', label: '', text: () => 'Poser une clé sur toute la transformation',
+        onClick: () => this.change(() => ed.keyBone(bone, ['rotate', 'translate', 'scale', 'shear'])),
+      },
+      {
+        type: 'button', label: '', text: () => 'Revenir à la pose de base (clés à cette image)',
+        onClick: () => this.change(() => {
+          bone.setToSetupPose();
+          ed.keyBone(bone, ['rotate', 'translate', 'scale', 'shear'].filter((t) => ed.keyState('bone', bone.name, t)));
+        }),
+      },
+    ];
+  }
+
+  animSlotRows(slot) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    const p = slot.pose;
+    const colorType = () => ed.colorTimelineType(slot);
+    const keyColor = () => ed.keySlot(slot, [colorType()]);
+    return [
+      { type: 'info', text: () => `Slot « ${slot.name} » (os « ${slot.bone.name} »), image ${ed.frame}.` },
+      {
+        type: 'select', label: 'Visible', key: { owner: 'slot', name: slot.name, type: 'attachment' },
+        options: () => [['', '(aucune)'], ...[...sk.defaultSkin.attachmentsOf(slot.name).keys()].map((n) => [n, n])],
+        get: () => p.attachment ?? '',
+        set: (v) => this.change(() => {
+          p.attachment = v || null;
+          ed.keySlot(slot, ['attachment']);
+        }),
+      },
+      {
+        type: 'color', label: 'Teinte', key: { owner: 'slot', name: slot.name, type: colorType },
+        get: () => splitAlpha(p.color).rgb,
+        set: (v) => this.change(() => {
+          p.color = joinAlpha(v, splitAlpha(p.color).alpha);
+          keyColor();
+        }),
+      },
+      {
+        type: 'range', label: 'Opacité', min: 0, max: 1, step: 0.01, key: { owner: 'slot', name: slot.name, type: colorType },
+        get: () => splitAlpha(p.color).alpha,
+        set: (v) => this.change(() => {
+          p.color = joinAlpha(splitAlpha(p.color).rgb, v);
+          keyColor();
+        }),
+      },
+      {
+        type: 'color', label: 'Couleur sombre', key: { owner: 'slot', name: slot.name, type: 'rgba2' },
+        get: () => p.dark ?? '#000000',
+        set: (v) => this.change(() => {
+          p.dark = v;
+          ed.keySlot(slot, ['rgba2']);
+        }),
+      },
+    ];
   }
 
   slotRows(slot) {
@@ -202,7 +290,7 @@ export class PropertiesPanel {
     const sk = editor.skeleton;
     const sig = [
       editor.selectionKind, editor.selected?.name, editor.selectedSlot?.name, editor.selectedAttachment,
-      Boolean(sk.reference), sk.slotsOf(editor.selected).length === 0, sk,
+      Boolean(sk.reference), sk.slotsOf(editor.selected).length === 0, sk, editor.mode,
     ];
     const changed = !this.signature || sig.some((v, i) => v !== this.signature[i]);
     if (changed) this.build();
@@ -226,7 +314,14 @@ export class PropertiesPanel {
 
   refreshValues() {
     const active = document.activeElement;
-    for (const { def, input, extra } of this.rows) {
+    for (const { def, input, extra, keyBtn } of this.rows) {
+      if (keyBtn) {
+        const k = def.key;
+        const state = this.editor.keyState(k.owner, k.name, typeof k.type === 'function' ? k.type() : k.type);
+        keyBtn.textContent = state === 'key' ? '◆' : '◇';
+        keyBtn.classList.toggle('on', state === 'key');
+        keyBtn.classList.toggle('animated', state === 'timeline');
+      }
       if (def.disabled && input) input.disabled = def.disabled();
       if (def.type === 'info') {
         input.textContent = def.text();
@@ -276,6 +371,20 @@ function buildRow(form, def) {
   lab.className = 'prop-row';
   const span = document.createElement('span');
   span.textContent = def.label;
+  let keyBtn = null;
+  if (def.key) {
+    // Losange de clé : cliquer pose la clé avec la valeur actuelle.
+    keyBtn = document.createElement('button');
+    keyBtn.type = 'button';
+    keyBtn.className = 'key-btn';
+    keyBtn.title = 'Poser une clé à cette image';
+    keyBtn.setAttribute('aria-label', `Clé : ${def.label}`);
+    keyBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      def.set(def.get());
+    });
+    span.prepend(keyBtn);
+  }
   lab.appendChild(span);
   let input;
   let extra = null;
@@ -339,5 +448,5 @@ function buildRow(form, def) {
   lab.appendChild(input);
   if (extra) lab.appendChild(extra);
   form.appendChild(lab);
-  return { def, input, extra };
+  return { def, input, extra, keyBtn };
 }

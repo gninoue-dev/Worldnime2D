@@ -133,6 +133,23 @@ function buildMenu() {
       ],
     },
     {
+      label: 'A&nimation',
+      submenu: [
+        { label: 'Mode Configuration', accelerator: 'CmdOrCtrl+1', click: () => send('mode-setup') },
+        { label: 'Mode Animation', accelerator: 'CmdOrCtrl+2', click: () => send('mode-animate') },
+        { type: 'separator' },
+        { label: 'Lecture / pause', accelerator: 'P', registerAccelerator: false, click: () => send('play') },
+        { label: 'Image précédente', accelerator: 'Left', registerAccelerator: false, click: () => send('prev-frame') },
+        { label: 'Image suivante', accelerator: 'Right', registerAccelerator: false, click: () => send('next-frame') },
+        { label: 'Clé précédente', accelerator: 'Shift+Left', registerAccelerator: false, click: () => send('prev-key') },
+        { label: 'Clé suivante', accelerator: 'Shift+Right', registerAccelerator: false, click: () => send('next-key') },
+        { type: 'separator' },
+        { label: 'Poser une clé sur l\'os', accelerator: 'K', registerAccelerator: false, click: () => send('key-bone') },
+        { label: 'Copier les clés', accelerator: 'CmdOrCtrl+C', registerAccelerator: false, click: () => send('copy-keys') },
+        { label: 'Coller les clés', accelerator: 'CmdOrCtrl+V', registerAccelerator: false, click: () => send('paste-keys') },
+      ],
+    },
+    {
       label: '&Aide',
       submenu: [
         { label: 'Raccourcis clavier', accelerator: 'F1', click: () => send('help') },
@@ -317,9 +334,10 @@ ipcMain.handle('dialog:choose-folder', async (_e, { title, defaultPath }) => {
 });
 
 ipcMain.handle('dialog:choose-file', async (_e, { title, kind }) => {
-  const filters = kind === 'layers'
-    ? [{ name: 'Fichiers à calques (OpenRaster, Photoshop)', extensions: ['ora', 'psd'] }]
-    : [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }];
+  const filters = {
+    layers: [{ name: 'Fichiers à calques (OpenRaster, Photoshop)', extensions: ['ora', 'psd'] }],
+    audio: [{ name: 'Sons', extensions: ['ogg', 'mp3', 'wav'] }],
+  }[kind] ?? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }];
   const res = await dialog.showOpenDialog(win, { title, filters, properties: ['openFile'] });
   if (res.canceled || !res.filePaths[0]) return null;
   return res.filePaths[0];
@@ -327,7 +345,7 @@ ipcMain.handle('dialog:choose-file', async (_e, { title, kind }) => {
 
 // Lecture d'un fichier image ou à calques choisi par l'utilisateur.
 ipcMain.handle('file:read-binary', async (_e, file) => {
-  if (!/\.(png|jpe?g|webp|ora|psd)$/i.test(file)) throw new Error('Type de fichier non pris en charge.');
+  if (!/\.(png|jpe?g|webp|ora|psd|ogg|mp3|wav)$/i.test(file)) throw new Error('Type de fichier non pris en charge.');
   return fs.readFile(file);
 });
 

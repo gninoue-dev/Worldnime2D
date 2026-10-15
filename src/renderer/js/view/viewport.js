@@ -10,6 +10,10 @@ import { TOOLS } from '../editor/editor.js';
 import { atan2Deg, wrapDeg, distToSegment } from '../model/math.js';
 import { RegionAttachment, quadContains } from '../model/attachment.js';
 import { AttachmentsView } from './attachments.js';
+import { parseProject, serializeProject } from '../model/format.js';
+
+// Pelure d'oignon : images fantômes avant (rouge) et après (vert) l'instant courant.
+const ONION = { count: 2, stepFrames: 3, before: [1, 0.45, 0.45], after: [0.45, 1, 0.55], alpha: 0.28 };
 
 const COLORS = {
   background: 0x262626,
@@ -59,6 +63,13 @@ export class Viewport {
     this.reference = { path: null, texture: null };
     // Fonction appelée quand on dépose une image du panneau Images sur la vue.
     this.onDropImage = null;
+    // Fonction d'affichage des messages (fournie par la page).
+    this.notify = null;
+    // Pelure d'oignon : copie du squelette pour calculer les poses voisines.
+    this.ghostSkeleton = null;
+    this.ghostViews = [];
+    // Événements déclenchés pendant la lecture : { name, until }.
+    this.flashes = [];
   }
 
   async init(preference = 'webgl') {
@@ -84,7 +95,8 @@ export class Viewport {
     this.referenceSprite.anchor.set(0.5);
     this.referenceSprite.visible = false;
     this.attachments = new AttachmentsView(this.library, this.rendererName === 'webgl');
-    this.world.addChild(this.referenceSprite, this.attachments.container);
+    this.ghostLayer = new Container();
+    this.world.addChild(this.referenceSprite, this.ghostLayer, this.attachments.container);
     this.bonesLayer = new Graphics();
     this.overlay = new Graphics();
     this.labels = new Container();
@@ -94,7 +106,13 @@ export class Viewport {
     this.centerView();
     this.bindEvents();
     new ResizeObserver(() => this.render()).observe(this.host);
-    this.editor.addEventListener('change', () => this.render());
+    this.editor.addEventListener('change', (e) => {
+      if (['edit', 'undo', 'redo', 'reset', 'cancel', 'commit', 'drag', 'animation', 'mode'].includes(e.detail.reason)) {
+        this.ghostSkeleton = null;
+      }
+      this.render();
+    });
+    this.editor.addEventListener('events', (e) => this.flash(e.detail.map((k) => k.name)));
     this.library.addEventListener('change', () => this.render());
     this.render();
   }
@@ -142,8 +160,8 @@ export class Viewport {
       add(b.worldX, b.worldY);
       add(b.tipX, b.tipY);
     }
-    for (const slot of sk.slots) {
-      const att = sk.visibleAttachment(slot);
+    for (const slot of sk.drawOrder) {
+      const att = sk.currentAttachment(slot);
       if (!(att instanceof RegionAttachment)) continue;
       const v = att.worldVertices(slot.bone);
       for (let i = 0; i < 8; i += 2) add(v[i], v[i + 1]);
@@ -184,6 +202,7 @@ export class Viewport {
     this.world.scale.set(this.zoom, -this.zoom);
     this.drawGrid();
     this.drawReference();
+    this.drawGhosts();
     this.attachments.update(sk);
     this.drawBones();
     this.drawOverlay();
@@ -204,6 +223,43 @@ export class Viewport {
     // Le monde a son Y vers le haut : on retourne l'image pour qu'elle s'affiche à l'endroit.
     s.scale.set(ref.scale, -ref.scale);
     s.alpha = ref.alpha;
+  }
+
+  // Pelure d'oignon : la même animation quelques images avant et après, en transparence.
+  drawGhosts() {
+    const editor = this.editor;
+    const anim = editor.animation;
+    const on = editor.animating && editor.onion && anim && !editor.playing && this.attachments.visible;
+    this.ghostLayer.visible = Boolean(on);
+    if (!on) return;
+    if (!this.ghostSkeleton) {
+      this.ghostSkeleton = parseProject(JSON.stringify(serializeProject(editor.skeleton)));
+      this.ghostSkeleton.posed = true;
+    }
+    const gs = this.ghostSkeleton;
+    const ganim = gs.findAnimation(anim.name);
+    const offsets = [];
+    for (let i = ONION.count; i >= 1; i--) offsets.push(-i, i);
+    this.ghostLayer.removeChildren();
+    offsets.forEach((o, n) => {
+      const time = editor.time + (o * ONION.stepFrames) / editor.fps;
+      if (time < 0 || time > anim.duration + 1e-6) return;
+      if (!this.ghostViews[n]) this.ghostViews[n] = new AttachmentsView(this.library, this.attachments.useShader);
+      const view = this.ghostViews[n];
+      gs.setToSetupPose();
+      ganim?.apply(gs, time);
+      gs.updateWorldTransform();
+      view.update(gs, { color: o < 0 ? ONION.before : ONION.after, alpha: ONION.alpha / Math.abs(o) });
+      this.ghostLayer.addChild(view.container);
+    });
+  }
+
+  // Affiche brièvement le nom des événements déclenchés.
+  flash(names) {
+    const until = performance.now() + 900;
+    for (const name of names) this.flashes.push({ name, until });
+    setTimeout(() => this.render(), 950);
+    this.render();
   }
 
   drawGrid() {
@@ -274,6 +330,7 @@ export class Viewport {
 
       if (this.showNames || selected) {
         const label = this.label(labelIndex++);
+        label.style.fontWeight = 'normal';
         label.text = bone.name;
         label.style.fill = selected ? COLORS.selected : 0xcfcfcf;
         label.x = Math.round((o.x + t.x) / 2 + 8);
@@ -281,6 +338,20 @@ export class Viewport {
         label.visible = true;
       }
     }
+
+    // Événements déclenchés pendant la lecture, au-dessus de la racine.
+    const now = performance.now();
+    this.flashes = this.flashes.filter((f) => f.until > now);
+    const root = this.toScreen(sk.root.worldX, sk.root.worldY);
+    this.flashes.forEach((f, i) => {
+      const label = this.label(labelIndex++);
+      label.text = `⚡ ${f.name}`;
+      label.style.fill = 0xffd54f;
+      label.style.fontWeight = 'bold';
+      label.x = Math.round(root.x + 12);
+      label.y = Math.round(root.y - 40 - i * 16);
+      label.visible = true;
+    });
   }
 
   label(i) {
@@ -316,7 +387,7 @@ export class Viewport {
       if (att) this.strokeAttachment(g, this.hover.slot, att, COLORS.hover, 1);
     }
     if (editor.selectedSlot) {
-      const att = editor.attachment ?? sk.visibleAttachment(editor.selectedSlot);
+      const att = editor.attachment ?? sk.currentAttachment(editor.selectedSlot);
       if (att instanceof RegionAttachment) {
         this.strokeAttachment(g, editor.selectedSlot, att, editor.attachment ? COLORS.selected : COLORS.attachment, 2);
       }
@@ -376,9 +447,9 @@ export class Viewport {
     if (!this.attachments.visible) return null;
     const sk = this.editor.skeleton;
     const w = this.toWorld(sx, sy);
-    for (let i = sk.slots.length - 1; i >= 0; i--) {
-      const slot = sk.slots[i];
-      const att = sk.visibleAttachment(slot);
+    for (let i = sk.drawOrder.length - 1; i >= 0; i--) {
+      const slot = sk.drawOrder[i];
+      const att = sk.currentAttachment(slot);
       if (!(att instanceof RegionAttachment)) continue;
       const v = att.worldVertices(slot.bone);
       if (!quadContains(v, w.x, w.y)) continue;
@@ -399,6 +470,8 @@ export class Viewport {
   selectHit(hit) {
     if (!hit) return;
     if (hit.kind === 'bone') this.editor.select(hit.bone);
+    // En mode Animation, cliquer sur une image sélectionne son os : on anime un membre en cliquant dessus.
+    else if (this.editor.animating) this.editor.select(hit.slot.bone);
     else this.editor.selectAttachment(hit.slot, hit.name);
   }
 
@@ -473,6 +546,11 @@ export class Viewport {
       return;
     }
 
+    if (editor.tool === TOOLS.create && editor.animating) {
+      this.notify?.('En mode Animation, on ne crée pas d\'os : repassez en mode Configuration.');
+      return;
+    }
+
     if (editor.tool === TOOLS.create) {
       // Glisser depuis un os crée un enfant de cet os ; un simple clic dessus le sélectionne.
       const hit = this.hitBone(p.x, p.y);
@@ -485,7 +563,7 @@ export class Viewport {
     this.selectHit(this.hitTest(p.x, p.y));
     const target = editor.selectionKind === 'attachment'
       ? attachmentTarget(editor.selectedSlot, editor.attachment)
-      : editor.selectionKind === 'bone' ? boneTarget(editor.selected) : null;
+      : editor.selectionKind === 'bone' ? boneTarget(editor.selected, editor.animating) : null;
     if (!target) return;
     if (editor.tool === TOOLS.shear && !target.canShear) return;
     editor.begin();
@@ -584,6 +662,8 @@ export class Viewport {
       default:
         break;
     }
+    // Mode Animation : la pose modifiée devient une clé au temps courant (clé automatique).
+    if (this.editor.animating && this.editor.autoKey && t.bone) this.editor.keyBone(t.bone, [d.kind]);
     this.editor.skeleton.updateWorldTransform();
     this.editor.emit('drag');
   }
@@ -619,10 +699,9 @@ export class Viewport {
         // Un simple clic dans le vide crée un os de longueur nulle.
         if (!isClick) {
           sk.updateWorldTransform();
-          bone.updateWorldTransform();
           const worldAngle = atan2Deg(d.end.y - d.start.y, d.end.x - d.start.x);
           bone.rotation = bone.worldToLocalRotation(worldAngle);
-          bone.updateWorldTransform();
+          sk.updateWorldTransform();
           bone.length = Math.hypot(d.end.x - d.start.x, d.end.y - d.start.y) / (bone.worldScaleX || 1);
         }
         editor.selected = bone;
@@ -658,30 +737,33 @@ function determinantSign(b) {
   return b ? Math.sign(b.a * b.d - b.b * b.c) || 1 : 1;
 }
 
-function boneTarget(bone) {
+// En mode Animation, la cible est la pose courante de l'os (bone.pose) ; sinon, sa pose de base.
+function boneTarget(bone, animating = false) {
   if (!bone) return null;
+  const v = animating ? bone.pose : bone;
   return {
+    bone,
     canShear: true,
     flip: determinantSign(bone.parent),
     frame: () => ({ x: bone.worldX, y: bone.worldY, ax: bone.a, ay: bone.c, bx: bone.b, by: bone.d }),
     save: () => ({
-      rotation: bone.rotation, scaleX: bone.scaleX, scaleY: bone.scaleY, shearX: bone.shearX, shearY: bone.shearY,
+      rotation: v.rotation, scaleX: v.scaleX, scaleY: v.scaleY, shearX: v.shearX, shearY: v.shearY,
     }),
     setRotation: (r) => {
-      bone.rotation = r;
+      v.rotation = r;
     },
     setWorldPosition: (x, y) => {
       const l = bone.parentWorldToLocal(x, y);
-      bone.x = l.x;
-      bone.y = l.y;
+      v.x = l.x;
+      v.y = l.y;
     },
     setScale: (sx, sy) => {
-      bone.scaleX = sx;
-      bone.scaleY = sy;
+      v.scaleX = sx;
+      v.scaleY = sy;
     },
     setShear: (shx, shy) => {
-      bone.shearX = shx;
-      bone.shearY = shy;
+      v.shearX = shx;
+      v.shearY = shy;
     },
   };
 }

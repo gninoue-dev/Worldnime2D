@@ -17,7 +17,9 @@ export class TreePanel {
     this.collapsed = new Set();
     this.dragItem = null;
     editor.addEventListener('change', (e) => {
-      if (e.detail.reason !== 'drag') this.render();
+      const r = e.detail.reason;
+      if (r === 'drag' || r === 'keys' || (r === 'time' && editor.playing)) return;
+      this.render();
     });
     this.render();
   }
@@ -72,7 +74,7 @@ export class TreePanel {
       if (drop) {
         r.addEventListener('dragover', (e) => {
           const ok = (this.dragItem && drop.accepts(this.dragItem)) || e.dataTransfer.types.includes(IMAGE_DRAG_TYPE);
-          if (!ok) return;
+          if (!ok || this.editor.animating) return;
           e.preventDefault();
           r.classList.add('drop-target');
         });
@@ -160,7 +162,9 @@ export class TreePanel {
       });
       if (!open) return;
       for (const [name, att] of atts) {
-        const visible = slot.attachment === name;
+        // En mode Animation, le rond montre et anime la pose courante (clé de pièce jointe).
+        const animating = editor.animating;
+        const visible = (animating ? slot.pose.attachment : slot.attachment) === name;
         const eye = document.createElement('button');
         eye.type = 'button';
         eye.className = `eye${visible ? ' on' : ''}`;
@@ -169,7 +173,10 @@ export class TreePanel {
         eye.addEventListener('click', (e) => {
           e.stopPropagation();
           editor.apply(() => {
-            slot.attachment = visible ? null : name;
+            if (animating) {
+              slot.pose.attachment = visible ? null : name;
+              editor.keySlot(slot, ['attachment']);
+            } else slot.attachment = visible ? null : name;
           });
         });
         eye.addEventListener('dblclick', (e) => e.stopPropagation());
@@ -241,7 +248,9 @@ export class DrawOrderPanel {
     this.notify = notify;
     this.dragSlot = null;
     editor.addEventListener('change', (e) => {
-      if (e.detail.reason !== 'drag') this.render();
+      const r = e.detail.reason;
+      if (r === 'drag' || r === 'keys' || (r === 'time' && editor.playing)) return;
+      this.render();
     });
     this.render();
   }
@@ -255,7 +264,9 @@ export class DrawOrderPanel {
     }
     const ul = document.createElement('ul');
     ul.className = 'tree';
-    const ordered = [...sk.slots].reverse();
+    // En mode Animation, on montre et on anime l'ordre courant.
+    const animating = editor.animating;
+    const ordered = [...(animating ? sk.drawOrder : sk.slots)].reverse();
     ordered.forEach((slot) => {
       const li = document.createElement('li');
       const r = document.createElement('div');
@@ -294,10 +305,15 @@ export class DrawOrderPanel {
         if (!moving || moving === slot) return;
         editor.apply(() => {
           // En haut de la liste = en avant = fin du tableau des slots.
-          const without = sk.slots.filter((s) => s !== moving);
+          const list = animating ? sk.drawOrder : sk.slots;
+          const without = list.filter((s) => s !== moving);
           const idx = without.indexOf(slot);
           const target = above ? idx + 1 : idx;
-          sk.moveSlot(moving, target);
+          if (animating) {
+            without.splice(target, 0, moving);
+            sk.drawOrder = without;
+            editor.keyDrawOrder();
+          } else sk.moveSlot(moving, target);
           editor.selected = moving.bone;
           editor.selectedSlot = moving;
           editor.selectedAttachment = null;

@@ -143,6 +143,7 @@ export async function runSelftest({ editor, viewport, api, ...extra }) {
     document.getElementById('help').close();
 
     if (extra.info?.selftestOra) await testV02({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
+    if (extra.info?.selftestOra) await testV03({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
   } catch (err) {
     check('exception', false, err.stack || err.message);
   }
@@ -352,4 +353,148 @@ async function testV02({ editor, viewport, api, check, near, pointer, dragWorld,
     check('import PSD : couleur de la tête affichée', Math.abs(px[0] - 235) < 6 && Math.abs(px[1] - 190) < 6, String(px));
     await api.selftestCapture('09-import-psd');
   }
+}
+
+// --- v0.3 : animation ---------------------------------------------------------------------
+
+async function testV03({ editor, viewport, api, check, near, dragWorld, library, importLayers, info, setTab, timeline }) {
+  const sk = () => editor.skeleton;
+  const { Skeleton } = await import('./model/skeleton.js');
+  editor.setMode('setup');
+  editor.reset(new Skeleton());
+  await waitFor(() => library.dir === null);
+  await importLayers(info.selftestOra, `${info.selftestDir}/images_anim`);
+
+  // Un os pour la tête, avec le slot de la tête dessus.
+  const head = sk().visibleAttachment(sk().findSlot('tete'));
+  editor.apply(() => {
+    const b = sk().addBone('cou', sk().root);
+    b.x = head.x;
+    b.y = head.y - head.height / 2;
+    b.rotation = 90;
+    b.length = head.height;
+    sk().updateWorldTransform();
+    sk().setSlotBone(sk().findSlot('tete'), b);
+  });
+  viewport.frameAll();
+
+  // 1. Passage en mode Animation par le bouton.
+  document.querySelector('.mode-btn[data-mode="animate"]').click();
+  await frame();
+  check('mode Animation : animation créée, timeline affichée', editor.animating && editor.animation && !document.getElementById('timeline').hidden);
+  editor.setTool('rotate');
+  const cou = () => sk().findBone('cou');
+  editor.select(cou());
+
+  // 2. Clé automatique à l'image 0 en tournant l'os.
+  const tip0 = { x: cou().tipX, y: cou().tipY };
+  await dragWorld([tip0.x, tip0.y], [tip0.x - 60, tip0.y]);
+  const keys = () => editor.animation.timeline('bone', 'cou', 'rotate') ?? [];
+  check('clé automatique à l\'image 0', keys().length === 1 && keys()[0].time === 0 && Math.abs(keys()[0].value) > 5, keys()[0]?.value);
+  check('la pose de base n\'est pas modifiée', near(cou().rotation, 90));
+
+  // 3. Clic dans la règle de la timeline : image 15.
+  await frame();
+  const tc = timeline.canvas;
+  const tr = tc.getBoundingClientRect();
+  const fx = (f) => tr.left + timeline.frameToX(f);
+  const tpointer = (type, x, y, extra = {}) => tc.dispatchEvent(new PointerEvent(type, {
+    bubbles: true, pointerId: 2, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y, ...extra,
+  }));
+  tpointer('pointerdown', fx(15), tr.top + 10);
+  tpointer('pointerup', fx(15), tr.top + 10);
+  check('clic dans la règle : image 15', editor.frame === 15, editor.frame);
+
+  const tip1 = { x: cou().tipX, y: cou().tipY };
+  await dragWorld([tip1.x, tip1.y], [tip1.x + 120, tip1.y - 20]);
+  check('deuxième clé à l\'image 15', keys().length === 2 && near(keys()[1].time, 0.5, 1e-6));
+  const r0 = keys()[0].value + 90;
+  const r1 = keys()[1].value + 90;
+  editor.setFrame(7);
+  const mid = cou().pose.rotation;
+  check('interpolation entre les clés', (mid - r0) * (mid - r1) < 0, `${r0} < ${mid} < ${r1}`);
+
+  // 4. Pièce jointe animée par le rond de l'arbre, ordre d'affichage animé.
+  setTab('tree');
+  editor.setFrame(10);
+  await frame();
+  const eye = [...document.querySelectorAll('#tree .eye.on')][0];
+  eye.click();
+  const attKeys = [...editor.animation.slots.values()].some((t) => t.attachment?.some((k) => k.name === null));
+  check('clé de pièce jointe (cacher une image)', attKeys);
+  editor.selectSlot(sk().findSlot('tete'));
+  setTab('draworder');
+  document.querySelector('[data-cmd="move-down"]').click();
+  check('clé d\'ordre d\'affichage', editor.animation.drawOrder.length === 1);
+
+  // 5. Événement posé, puis lecture : l'événement est déclenché.
+  setTab('animations');
+  editor.apply(() => sk().addEvent('pas'));
+  editor.setFrame(5);
+  editor.apply(() => editor.animation.setKey('events', '', 'events', { time: editor.time, name: 'pas' }));
+  const fired = [];
+  const onEvents = (e) => fired.push(...e.detail.map((k) => k.name));
+  editor.addEventListener('events', onEvents);
+  editor.setFrame(0);
+  editor.loop = true;
+  editor.togglePlay();
+  await wait(700);
+  editor.togglePlay();
+  editor.removeEventListener('events', onEvents);
+  check('lecture : le temps avance', editor.time > 0.1, editor.time);
+  check('lecture : événement déclenché', fired.includes('pas'), fired.join(','));
+
+  // 6. Pelure d'oignon.
+  editor.setFrame(8);
+  editor.onion = true;
+  editor.emit('onion');
+  await frame();
+  check('pelure d\'oignon affichée', viewport.ghostLayer.visible && viewport.ghostLayer.children.length >= 2, viewport.ghostLayer.children.length);
+  await api.selftestCapture('10-animation-oignon');
+  editor.onion = false;
+  editor.emit('onion');
+
+  // 7. Sélection d'une clé dans la timeline (clic sur le losange), puis glisser de 5 images.
+  editor.select(cou());
+  await frame();
+  timeline.draw();
+  const rows = timeline.rows();
+  const ri = rows.findIndex((r) => r.kind === 'bone' && r.bone.name === 'cou');
+  const ry = tr.top + 22 + ri * 20 + 10 - timeline.scrollY;
+  tpointer('pointerdown', fx(15), ry);
+  check('clic sur une clé : sélection', editor.selectedKeys.length === 1 && near(editor.selectedKeys[0].key.time, 0.5, 1e-6), editor.selectedKeys.length);
+  tpointer('pointermove', fx(18), ry);
+  tpointer('pointermove', fx(20), ry);
+  tpointer('pointerup', fx(20), ry);
+  check('glisser une clé : image 15 → 20', near(keys()[1].time, 20 / 30, 1e-6), keys()[1].time * 30);
+  editor.undo();
+  check('annuler le déplacement de la clé', near(keys()[1].time, 0.5, 1e-6));
+
+  // 8. Courbe en palier sur la première clé.
+  editor.selectKeys([{ owner: 'bone', name: 'cou', type: 'rotate', key: keys()[0] }]);
+  editor.setCurve('stepped');
+  editor.setFrame(10);
+  check('courbe en palier', near(cou().pose.rotation, r0, 0.01), `${cou().pose.rotation} ≠ ${r0}`);
+
+  // 9. Copier / coller.
+  editor.copySelectedKeys();
+  editor.setFrame(25);
+  editor.pasteKeys();
+  check('copier-coller de clé', keys().length === 3 && near(keys()[2].time, 25 / 30, 1e-6));
+
+  // 10. Enregistrement / relecture des animations.
+  const text = editor.toText();
+  const { parseProject } = await import('./model/format.js');
+  const again = parseProject(text);
+  check('animations enregistrées et relues', again.findAnimation(editor.animationName).timeline('bone', 'cou', 'rotate').length === 3
+    && again.events.has('pas'));
+
+  await frame();
+  await wait(80);
+  await api.selftestCapture('11-timeline');
+
+  // 11. Retour en mode Configuration : pose de base.
+  document.querySelector('.mode-btn[data-mode="setup"]').click();
+  await frame();
+  check('retour en Configuration : pose de base, timeline cachée', near(cou().pose.rotation, 90) && document.getElementById('timeline').hidden);
 }

@@ -42,6 +42,10 @@ export class Bone {
     this.inherit = INHERIT.normal;
     this.color = DEFAULT_BONE_COLOR;
 
+    // Pose courante : la pose de base, modifiée par les animations et les contraintes.
+    // C'est elle qui sert au calcul de la matrice monde.
+    this.pose = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, shearX: 0, shearY: 0 };
+
     // Matrice monde.
     this.a = 1;
     this.b = 0;
@@ -51,8 +55,19 @@ export class Bone {
     this.worldY = 0;
   }
 
+  setToSetupPose() {
+    const p = this.pose;
+    p.x = this.x;
+    p.y = this.y;
+    p.rotation = this.rotation;
+    p.scaleX = this.scaleX;
+    p.scaleY = this.scaleY;
+    p.shearX = this.shearX;
+    p.shearY = this.shearY;
+  }
+
   updateWorldTransform() {
-    const { x, y, rotation, scaleX, scaleY, shearX, shearY } = this;
+    const { x, y, rotation, scaleX, scaleY, shearX, shearY } = this.pose;
     const parent = this.parent;
 
     if (!parent) {
@@ -190,11 +205,11 @@ export class Bone {
     };
   }
 
-  // Convertit une rotation monde en rotation locale pour cet os (repère du parent).
+  // Convertit une rotation monde en rotation locale (de la pose courante) pour cet os.
   worldToLocalRotation(worldRotation) {
     const sin = sinDeg(worldRotation);
     const cos = cosDeg(worldRotation);
-    return atan2Deg(this.a * sin - this.c * cos, this.d * cos - this.b * sin) + this.rotation - this.shearX;
+    return atan2Deg(this.a * sin - this.c * cos, this.d * cos - this.b * sin) + this.pose.rotation - this.pose.shearX;
   }
 
   // Coordonnées (dans le repère du parent) d'un point du monde.

@@ -28,5 +28,13 @@ export class Slot {
     // Nom de la pièce jointe visible dans la pose de base (null = rien).
     this.attachment = null;
     this.blend = BLEND_MODES.normal;
+    // Pose courante (modifiée par les animations).
+    this.pose = { color: WHITE, dark: null, attachment: null };
+  }
+
+  setToSetupPose() {
+    this.pose.color = this.color;
+    this.pose.dark = this.dark;
+    this.pose.attachment = this.attachment;
   }
 }

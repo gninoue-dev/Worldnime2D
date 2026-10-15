@@ -28,15 +28,15 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Import d'un fichier PSD ou ORA découpé en calques (Krita, Photoshop, GIMP)
 - [x] Fond de référence (image derrière le personnage)
 
-## v0.3 — Animation (mode Animation)
+## v0.3 — Animation (mode Animation) ✅
 
-- [ ] Passage Configuration / Animation, plusieurs animations par projet
-- [ ] Timeline (dopesheet) : clés de rotation, position, échelle, cisaillement
-- [ ] Clés de pièce jointe, de couleur et d'ordre d'affichage
-- [ ] Lecture, boucle, vitesse, plage de lecture, images par seconde
-- [ ] Clé automatique, copier / coller de clés, déplacement et mise à l'échelle de clés
-- [ ] Pelure d'oignon (ghosting)
-- [ ] Événements (entier, décimal, texte, son) posés sur la timeline
+- [x] Passage Configuration / Animation, plusieurs animations par projet
+- [x] Timeline (dopesheet) : clés de rotation, position, échelle, cisaillement
+- [x] Clés de pièce jointe, de couleur, de couleur sombre et d'ordre d'affichage
+- [x] Lecture, boucle, vitesse, plage de lecture, images par seconde
+- [x] Clé automatique, copier / coller de clés, déplacement et mise à l'échelle de clés
+- [x] Pelure d'oignon (ghosting)
+- [x] Événements (entier, décimal, texte, son) posés sur la timeline, joués pendant la lecture
 
 ## v0.4 — Courbes
 

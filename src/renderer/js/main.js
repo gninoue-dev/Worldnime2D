@@ -4,6 +4,8 @@ import { Editor, TOOLS, TOOL_INFO } from './editor/editor.js';
 import { Viewport, isTyping } from './view/viewport.js';
 import { TreePanel, DrawOrderPanel, ImagesPanel } from './ui/tree.js';
 import { PropertiesPanel } from './ui/properties.js';
+import { TimelinePanel } from './ui/timeline.js';
+import { AnimationsPanel } from './ui/animations.js';
 import { Skeleton } from './model/skeleton.js';
 import { RegionAttachment } from './model/attachment.js';
 import { round } from './model/math.js';
@@ -53,6 +55,7 @@ async function start() {
       `zoom ${Math.round(s.zoom * 100)} %`,
       `${editor.skeleton.bones.length} os · ${editor.skeleton.slots.length} slots`,
       s.hover ? `survol : ${s.hover}` : '',
+      editor.animating ? `animation : ${editor.animationName} · image ${editor.frame}` : 'mode Configuration',
       `outil : ${TOOL_INFO[editor.tool].label}`,
       `rendu : ${viewport.rendererName === 'webgl' ? 'WebGL' : `${viewport.rendererName} (secours)`}`,
     ];
@@ -68,6 +71,7 @@ async function start() {
     statusEl.append(grow, ver);
   });
   await viewport.init(info.renderer);
+  viewport.notify = notify;
   if (viewport.rendererName !== 'webgl') {
     notify('Accélération graphique (WebGL) indisponible : aperçu simplifié, la teinte sombre ne s\'affiche pas.', 'info');
   }
@@ -183,11 +187,47 @@ async function start() {
     actions.attachImage(path, editor.selected ?? editor.skeleton.root, null, worldPos);
   };
 
+  // --- Sons des événements ------------------------------------------------------------
+  // Le chemin du son est relatif au fichier du projet. Les sons décodés sont gardés en cache.
+  let audioCtx = null;
+  const sounds = new Map();
+  const playEventSound = async (key) => {
+    const data = editor.skeleton.events.get(key.name);
+    if (!data?.audio) return;
+    try {
+      audioCtx ??= new AudioContext();
+      const abs = await api.resolvePath(editor.filePath, data.audio);
+      if (!abs) return;
+      if (!sounds.has(abs)) sounds.set(abs, audioCtx.decodeAudioData((await api.readBinary(abs)).buffer.slice(0)));
+      const buffer = await sounds.get(abs);
+      const src = audioCtx.createBufferSource();
+      src.buffer = buffer;
+      const gain = audioCtx.createGain();
+      gain.gain.value = key.volume ?? data.volume;
+      const pan = audioCtx.createStereoPanner();
+      pan.pan.value = Math.max(-1, Math.min(1, key.balance ?? data.balance));
+      src.connect(gain).connect(pan).connect(audioCtx.destination);
+      src.start();
+    } catch (err) {
+      sounds.delete(data.audio);
+      notify(`Son introuvable pour l'événement « ${key.name} » : ${data.audio}`);
+    }
+  };
+  editor.addEventListener('events', (e) => e.detail.forEach((k) => playEventSound(k)));
+
   // --- Panneaux -------------------------------------------------------------------------
   new TreePanel(editor, document.getElementById('tree'), notify, actions);
   new DrawOrderPanel(editor, document.getElementById('draworder'), notify);
   new ImagesPanel(editor, library, document.getElementById('images'), actions);
   new PropertiesPanel(editor, document.getElementById('props'), notify, actions);
+  new AnimationsPanel(editor, document.getElementById('animations'), notify, {
+    chooseAudio: async () => {
+      const file = await api.chooseFile('Son de l\'événement', 'audio');
+      return file ? api.relativePath(editor.filePath, file) : null;
+    },
+  });
+  const timelineEl = document.getElementById('timeline');
+  const timeline = new TimelinePanel(editor, timelineEl, notify);
 
   let activeTab = 'tree';
   const setTab = (tab) => {
@@ -197,7 +237,7 @@ async function start() {
       b.classList.toggle('active', on);
       b.setAttribute('aria-selected', String(on));
     }
-    for (const id of ['tree', 'draworder', 'images']) document.getElementById(id).hidden = id !== tab;
+    for (const id of ['tree', 'draworder', 'images', 'animations']) document.getElementById(id).hidden = id !== tab;
   };
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => setTab(b.dataset.tab)));
   setTab('tree');
@@ -217,15 +257,36 @@ async function start() {
   }
 
   const refreshChrome = () => {
-    for (const b of toolsEl.children) b.classList.toggle('active', b.dataset.tool === editor.tool);
+    for (const b of toolsEl.children) {
+      b.classList.toggle('active', b.dataset.tool === editor.tool);
+      b.disabled = editor.animating && b.dataset.tool === TOOLS.create;
+    }
+    for (const b of document.querySelectorAll('.mode-btn')) b.classList.toggle('active', b.dataset.mode === editor.mode);
+    document.body.classList.toggle('animating', editor.animating);
+    if (timelineEl.hidden === editor.animating) {
+      timelineEl.hidden = !editor.animating;
+      requestAnimationFrame(() => timeline.draw());
+    }
     document.getElementById('btn-undo').disabled = !editor.canUndo;
     document.getElementById('btn-redo').disabled = !editor.canRedo;
     document.title = editor.title;
     api.setDirty(editor.dirty);
   };
+  document.querySelectorAll('.mode-btn').forEach((b) => b.addEventListener('click', () => editor.setMode(b.dataset.mode)));
+
+  // Boucle de lecture.
+  let lastFrame = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(0.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    if (editor.playing) editor.step(dt);
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+
   editor.addEventListener('change', (e) => {
     const reason = e.detail.reason;
-    if (reason !== 'drag') refreshChrome();
+    if (reason !== 'drag' && !(reason === 'time' && editor.playing)) refreshChrome();
     if (['reset', 'undo', 'redo', 'cancel', 'saved'].includes(reason)) syncPaths().catch((err) => notify(err.message));
   });
   refreshChrome();
@@ -258,6 +319,11 @@ async function start() {
       const sk = editor.skeleton;
       sk.images = library.dir ? await api.relativePath(target, library.dir) : '';
       if (sk.reference && referenceAbs) sk.reference.path = await api.relativePath(target, referenceAbs);
+      for (const ev of sk.events.values()) {
+        if (!ev.audio) continue;
+        const abs = await api.resolvePath(editor.filePath, ev.audio);
+        if (abs) ev.audio = await api.relativePath(target, abs);
+      }
       await api.writeText(target, editor.toText());
       referenceKey = sk.reference ? `${target}|${sk.reference.path}` : null;
       editor.markSaved(target);
@@ -338,6 +404,15 @@ async function start() {
 
   // --- Commandes ----------------------------------------------------------------------------
 
+  // Les commandes qui changent la structure du squelette ne marchent qu'en mode Configuration.
+  const setupOnly = (fn) => () => {
+    if (editor.animating) {
+      notify('Cette action se fait en mode Configuration (Ctrl+1).');
+      return undefined;
+    }
+    return fn();
+  };
+
   const addChild = () => {
     const parent = editor.selected ?? editor.skeleton.root;
     editor.apply(() => {
@@ -357,9 +432,24 @@ async function start() {
     const sk = editor.skeleton;
     const slot = editor.selectedSlot;
     if (slot && (activeTab === 'draworder' || editor.selectionKind !== 'bone')) {
+      if (editor.animating) {
+        // Mode Animation : on réordonne l'ordre courant et on pose une clé d'ordre d'affichage.
+        const order = [...sk.drawOrder];
+        const i = order.indexOf(slot);
+        const j = Math.max(0, Math.min(order.length - 1, i + (dir < 0 ? 1 : -1)));
+        if (i === j) return;
+        order.splice(i, 1);
+        order.splice(j, 0, slot);
+        editor.apply(() => {
+          sk.drawOrder = order;
+          editor.keyDrawOrder();
+        });
+        return;
+      }
       editor.apply(() => sk.moveSlot(slot, sk.slots.indexOf(slot) + (dir < 0 ? 1 : -1)));
       return;
     }
+    if (editor.animating) return;
     const bone = editor.selected;
     if (!bone?.parent) return;
     editor.apply(() => sk.moveAmongSiblings(bone, dir));
@@ -380,7 +470,7 @@ async function start() {
     },
     save: () => save(false),
     'save-as': () => save(true),
-    'import-layers': () => importLayers(),
+    'import-layers': setupOnly(() => importLayers()),
     'choose-images': chooseImagesDir,
     'reload-images': () => library.reload(),
     'choose-reference': chooseReference,
@@ -392,7 +482,23 @@ async function start() {
         notify('La racine ne peut pas être supprimée.');
       }
     },
-    'add-child': addChild,
+    'add-child': setupOnly(addChild),
+    'mode-setup': () => editor.setMode('setup'),
+    'mode-animate': () => editor.setMode('animate'),
+    play: () => editor.togglePlay(),
+    'prev-frame': () => editor.setFrame(editor.frame - 1),
+    'next-frame': () => editor.setFrame(editor.frame + 1),
+    'prev-key': () => timeline.jumpKey(-1),
+    'next-key': () => timeline.jumpKey(1),
+    'key-bone': () => timeline.keySelected(),
+    'copy-keys': () => {
+      const n = editor.copySelectedKeys();
+      if (n) notify(`${n} clé(s) copiée(s).`, 'info');
+    },
+    'paste-keys': () => {
+      const n = editor.pasteKeys();
+      if (n) notify(`${n} clé(s) collée(s).`, 'info');
+    },
     'move-up': () => move(-1),
     'move-down': () => move(1),
     frame: () => viewport.frameAll(),
@@ -430,6 +536,14 @@ async function start() {
     if (ctrl && key === 'z' && !e.shiftKey) run('undo');
     else if (ctrl && (key === 'y' || (key === 'z' && e.shiftKey))) run('redo');
     else if (ctrl && key === 'd') run('duplicate');
+    else if (ctrl && key === 'c' && editor.animating) run('copy-keys');
+    else if (ctrl && key === 'v' && editor.animating) run('paste-keys');
+    else if (ctrl && key === '1') run('mode-setup');
+    else if (ctrl && key === '2') run('mode-animate');
+    else if (editor.animating && !ctrl && !e.altKey && key === 'p') run('play');
+    else if (editor.animating && !ctrl && !e.altKey && key === 'k') run('key-bone');
+    else if (editor.animating && !ctrl && key === 'arrowleft') run(e.shiftKey ? 'prev-key' : 'prev-frame');
+    else if (editor.animating && !ctrl && key === 'arrowright') run(e.shiftKey ? 'next-key' : 'next-frame');
     else if (ctrl || e.altKey) return;
     else if (key === 'delete' || key === 'backspace') run('delete');
     else if (key === 'f') run('frame');
@@ -446,7 +560,7 @@ async function start() {
   await loadFile(await api.pendingFile());
 
   if (info.selftest) {
-    runSelftest({ editor, viewport, api, library, actions, importLayers, info, setTab });
+    runSelftest({ editor, viewport, api, library, actions, importLayers, info, setTab, timeline });
   }
 }
 

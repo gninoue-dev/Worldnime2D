@@ -93,15 +93,56 @@ ses pièces jointes, par nom. Type `region` (une image), le seul en v0.2 :
 
 Couleur affichée d'un pixel : `image × (slot.color × attachment.color) + (1 − image) × slot.dark`.
 
+## `events`
+
+Définitions des événements, par nom : `int`, `float`, `string` (valeurs par défaut),
+et facultativement `audio` (chemin d'un son relatif au projet), `volume` (0 à 1), `balance` (−1 à 1).
+
+## `animations`
+
+Par nom d'animation. Le temps est en secondes. `skeleton.fps` (30 par défaut) ne sert qu'à la timeline.
+
+```json
+"marche": {
+  "bones": {
+    "bras": {
+      "rotate": [ { "time": 0, "value": 0, "curve": "stepped" }, { "time": 0.5, "value": 45 } ],
+      "translate": [ { "time": 0, "x": 0, "y": 10, "curve": [0.42, 0, 0.58, 1] } ],
+      "scale": [ { "time": 0, "x": 1.2, "y": 0.9 } ],
+      "shear": [ { "time": 0, "x": 0, "y": 5 } ]
+    }
+  },
+  "slots": {
+    "bouche": {
+      "attachment": [ { "time": 0.2, "name": "bouche_ouverte" }, { "time": 0.4, "name": null } ],
+      "rgba": [ { "time": 0, "color": "#ffffffff" } ],
+      "rgba2": [ { "time": 0, "light": "#ffffffff", "dark": "#000000" } ]
+    }
+  },
+  "drawOrder": [ { "time": 0.3, "order": ["bras_d", "torse", "bras_g"] } ],
+  "events": [ { "time": 0.25, "name": "pas", "int": 1 } ]
+}
+```
+
+Les clés d'os sont **relatives à la pose de base** : `rotate` et `shear` s'ajoutent, `translate` s'ajoute,
+`scale` multiplie. Avant la première clé d'une timeline, c'est la pose de base qui s'applique ;
+après la dernière, la dernière valeur.
+
+`curve` décrit le passage vers la clé suivante : absent (linéaire), `"stepped"` (palier) ou
+`[x1, y1, x2, y2]`, une courbe de Bézier normalisée (temps et valeur de 0 à 1), comme les « easing » CSS.
+
+`drawOrder.order` liste les slots du fond vers l'avant (`null` = ordre de la pose de base).
+Un slot absent de la liste (ajouté après coup) se place devant tous ceux qui le précèdent dans la pose de base.
+
 ## Sections réservées
 
-`ik`, `transform`, `path`, `physics`, `events` et `animations` sont vides en v0.2.
-Elles seront remplies par les versions suivantes.
+`ik`, `transform`, `path` et `physics` sont vides en v0.3. Elles seront remplies par les versions suivantes.
 
 ## Versions du format
 
 - `1` : v0.1, os seulement.
 - `2` : v0.2, slots, skins, dossier d'images, image de référence.
+- `3` : v0.3, animations, événements, cadence de la timeline.
 
 Une version de l'éditeur lit tous les fichiers plus anciens. `formatVersion` augmente quand le format change. Une version de l'éditeur refuse un fichier
 dont le `formatVersion` est plus récent que ce qu'elle connaît.

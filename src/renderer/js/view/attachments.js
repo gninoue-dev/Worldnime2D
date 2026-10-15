@@ -73,7 +73,8 @@ export class AttachmentsView {
   }
 
   // Redessine toutes les images du squelette (coordonnées monde).
-  update(skeleton) {
+  // ghost : { color: [r, g, b], alpha } pour dessiner un « fantôme » (pelure d'oignon).
+  update(skeleton, ghost = null) {
     this.container.removeChildren();
     this.missing.clear();
     if (!this.visible) {
@@ -81,21 +82,25 @@ export class AttachmentsView {
       return;
     }
     const used = new Set();
-    for (const slot of skeleton.slots) {
-      const att = skeleton.visibleAttachment(slot);
+    for (const slot of skeleton.drawOrder) {
+      const att = skeleton.currentAttachment(slot);
       if (!(att instanceof RegionAttachment)) continue;
       const verts = att.worldVertices(slot.bone);
       const entry = this.library.get(att.imagePath);
       if (!entry) {
-        this.drawMissing(verts);
+        if (!ghost) this.drawMissing(verts);
         continue;
       }
       used.add(slot.name);
-      const [sr, sg, sb, sa] = hexToRgba(slot.color);
+      const [sr, sg, sb, sa] = hexToRgba(slot.pose.color);
       const [ar, ag, ab, aa] = hexToRgba(att.color);
       const light = [sr * ar, sg * ag, sb * ab, sa * aa];
+      if (ghost) {
+        for (let i = 0; i < 3; i++) light[i] *= ghost.color[i];
+        light[3] *= ghost.alpha;
+      }
       const item = this.useShader
-        ? this.shaderItem(slot, entry.texture, verts, light)
+        ? this.shaderItem(slot, entry.texture, verts, light, ghost)
         : this.spriteItem(slot, entry.texture, verts, light);
       item.mesh.blendMode = PIXI_BLEND[slot.blend] ?? 'normal';
       this.container.addChild(item.mesh);
@@ -110,12 +115,12 @@ export class AttachmentsView {
     }
   }
 
-  shaderItem(slot, texture, verts, light) {
+  shaderItem(slot, texture, verts, light, ghost) {
     const item = this.meshItem(slot.name, texture);
     item.geometry.positions = verts;
     item.geometry.getBuffer('aPosition').update();
     item.uniforms.uniforms.uLight.set(light);
-    const [dr, dg, db] = slot.dark ? hexToRgba(slot.dark) : [0, 0, 0];
+    const [dr, dg, db] = slot.pose.dark && !ghost ? hexToRgba(slot.pose.dark) : [0, 0, 0];
     item.uniforms.uniforms.uDark.set([dr, dg, db]);
     item.uniforms.update();
     return item;

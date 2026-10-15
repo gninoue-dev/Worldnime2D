@@ -12,8 +12,8 @@
     <header class="topbar">
       <div class="brand"><img src="icon.png" alt=""><span>Worldnime2D</span></div>
       <div class="mode">
-        <button class="mode-btn active" type="button" title="Mode Configuration : construire le squelette">Configuration</button>
-        <button class="mode-btn" type="button" disabled title="Arrive dans une prochaine version">Animation</button>
+        <button class="mode-btn" type="button" data-mode="setup" title="Mode Configuration : construire le squelette (Ctrl+1)">Configuration</button>
+        <button class="mode-btn" type="button" data-mode="animate" title="Mode Animation : poser des clés dans le temps (Ctrl+2)">Animation</button>
       </div>
       <div class="file-actions">
         <button type="button" data-cmd="new" title="Nouveau (Ctrl+N)">Nouveau</button>
@@ -29,6 +29,8 @@
 
     <main class="viewport" id="viewport"></main>
 
+    <section class="timeline" id="timeline" aria-label="Timeline" hidden></section>
+
     <aside class="side">
       <section class="panel panel-tree">
         <h2>
@@ -36,6 +38,7 @@
             <button type="button" class="tab" role="tab" data-tab="tree">Arbre</button>
             <button type="button" class="tab" role="tab" data-tab="draworder">Ordre</button>
             <button type="button" class="tab" role="tab" data-tab="images">Images</button>
+            <button type="button" class="tab" role="tab" data-tab="animations">Anim.</button>
           </span>
           <span class="panel-actions">
             <button type="button" data-cmd="add-child" title="Ajouter un os enfant">＋</button>
@@ -48,6 +51,7 @@
         <div class="panel-body" id="tree" role="tabpanel"></div>
         <div class="panel-body" id="draworder" role="tabpanel" hidden></div>
         <div class="panel-body" id="images" role="tabpanel" hidden></div>
+        <div class="panel-body" id="animations" role="tabpanel" hidden></div>
       </section>
       <section class="panel panel-props">
         <h2><span>Propriétés</span></h2>
@@ -83,6 +87,13 @@
       <tr><td>Onglet Ordre</td><td>Glisser les slots pour changer l'ordre d'affichage (en haut = devant)</td></tr>
       <tr><td>Ctrl+I</td><td>Importer un fichier à calques ORA (Krita, GIMP) ou PSD (Photoshop)</td></tr>
       <tr><td>F5</td><td>Recharger les images (automatique quand un fichier change)</td></tr>
+      <tr><td>Ctrl+1 / Ctrl+2</td><td>Mode Configuration / mode Animation</td></tr>
+      <tr><td>P</td><td>Lecture / pause de l'animation</td></tr>
+      <tr><td>← / →</td><td>Image précédente / suivante (Maj : clé précédente / suivante)</td></tr>
+      <tr><td>K</td><td>Poser une clé de rotation, position et échelle sur l'os sélectionné</td></tr>
+      <tr><td>Ctrl+C / Ctrl+V</td><td>Copier les clés sélectionnées / les coller à l'image courante</td></tr>
+      <tr><td>Suppr (mode Animation)</td><td>Supprimer les clés sélectionnées</td></tr>
+      <tr><td>Timeline</td><td>Molette : défiler ; Ctrl + molette : zoom ; glisser dans le vide : sélection rectangle</td></tr>
     </table>
     <form method="dialog"><button>Fermer</button></form>
   </dialog>

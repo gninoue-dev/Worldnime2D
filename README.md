@@ -22,13 +22,28 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.2 — images et slots.** On peut construire un squelette, y attacher les images
-> d'un personnage (ou importer directement un fichier Krita / Photoshop) et régler l'ordre d'affichage.
-> L'animation, les maillages et les contraintes arrivent dans les prochaines versions.
+> **État actuel : v0.3 — animation.** On construit un squelette, on y attache les images d'un personnage
+> (ou on importe directement un fichier Krita / Photoshop), puis on l'anime avec une timeline à clés.
+> Les courbes avancées, les maillages et les contraintes arrivent dans les prochaines versions.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Animation (v0.3)
+
+- Mode **Configuration** (Ctrl+1) pour construire, mode **Animation** (Ctrl+2) pour animer
+- Plusieurs animations par projet (onglet **Anim.** : créer, dupliquer, renommer, supprimer)
+- **Timeline** (dopesheet) : clés de rotation, position, échelle, cisaillement, pièce jointe, couleur,
+  couleur sombre, ordre d'affichage et événements ; une ligne par os et par slot, dépliable par type
+- **Clé automatique** : on transforme un os à la souris, la clé est posée ; losanges ◆ / ◇ dans les propriétés
+- Clés relatives à la pose de base (comme Spine) : retoucher la pose de base se répercute sur les animations
+- Sélection des clés (clic, Maj, rectangle), déplacement, **étirement dans le temps** (Alt), copier / coller, suppression
+- Courbes par clé : linéaire, palier, et courbes douces prédéfinies
+- Lecture, boucle, vitesse, images par seconde, **plage de lecture** (Maj + glisser dans la règle)
+- **Pelure d'oignon** (images voisines en transparence)
+- **Événements** (entier, décimal, texte, son) : affichés et joués pendant la lecture
+- En mode Animation, cliquer sur une image sélectionne son os : on anime un membre en cliquant dessus
 
 ### Images et slots (v0.2)
 
@@ -93,7 +108,7 @@ src/renderer/js/
   model/              squelette, os, slots, pièces jointes, skins, format .wn2d (sans dépendance, testé)
   editor/             état de l'éditeur, sélection, outils, annuler/rétablir
   view/               zone de dessin PixiJS, shader « deux couleurs », gestion de la souris
-  ui/                 panneaux Arbre, Ordre, Images et Propriétés
+  ui/                 panneaux Arbre, Ordre, Images, Animations, Propriétés et timeline
   io/                 bibliothèque d'images, import ORA / PSD
 tests/                tests du modèle et de l'éditeur (node --test)
 tests/fixtures/       petits fichiers ORA et PSD de test (et les scripts qui les génèrent)

@@ -3,6 +3,7 @@
 import { Bone, INHERIT, DEFAULT_BONE_COLOR } from './bone.js';
 import { Slot } from './slot.js';
 import { Skin } from './skin.js';
+import { Animation, EventData } from './animation.js';
 
 export const ROOT_NAME = 'root';
 
@@ -14,8 +15,17 @@ export class Skeleton {
     // Image de référence affichée derrière le squelette (aide au montage, non exportée).
     this.reference = null;
     this.bones = [];
-    // Ordre d'affichage : le premier slot est dessiné au fond.
+    // Ordre d'affichage de la pose de base : le premier slot est dessiné au fond.
     this.slots = [];
+    // Ordre d'affichage courant (modifié par les animations).
+    this.drawOrder = [];
+    // false : la pose courante est toujours la pose de base (mode Configuration).
+    // true : la pose courante est calculée par une animation (mode Animation).
+    this.posed = false;
+    // Animations, définitions d'événements, et cadence de la timeline (images par seconde).
+    this.animations = [];
+    this.events = new Map();
+    this.fps = 30;
     this.skins = [new Skin('default')];
     this.addBone(ROOT_NAME, null);
   }
@@ -57,6 +67,7 @@ export class Skeleton {
     bone.parent.children = bone.parent.children.filter((c) => c !== bone);
     this.bones = this.bones.filter((b) => !doomed.has(b));
     for (const slot of this.slots.filter((sl) => doomed.has(sl.bone))) this.removeSlot(slot);
+    for (const anim of this.animations) for (const b of doomed) anim.removeBone(b.name);
     return [...doomed];
   }
 
@@ -77,6 +88,7 @@ export class Skeleton {
     if (!name) throw new Error('Le nom ne peut pas être vide.');
     if (name === bone.name) return;
     if (this.findBone(name)) throw new Error(`Un os s'appelle déjà « ${name} ».`);
+    for (const anim of this.animations) anim.renameBone(bone.name, name);
     bone.name = name;
   }
 
@@ -125,8 +137,20 @@ export class Skeleton {
     this.bones = out;
   }
 
+  setToSetupPose() {
+    for (const bone of this.bones) bone.setToSetupPose();
+    for (const slot of this.slots) slot.setToSetupPose();
+    this.drawOrder = [...this.slots];
+  }
+
   updateWorldTransform() {
+    if (!this.posed) this.setToSetupPose();
     for (const bone of this.bones) bone.updateWorldTransform();
+  }
+
+  // Pièce jointe affichée dans la pose courante.
+  currentAttachment(slot) {
+    return slot.pose.attachment ? this.getAttachment(slot, slot.pose.attachment) : null;
   }
 
   // --- Slots -------------------------------------------------------------------
@@ -159,6 +183,7 @@ export class Skeleton {
   removeSlot(slot) {
     this.slots = this.slots.filter((s) => s !== slot);
     for (const skin of this.skins) skin.removeSlot(slot.name);
+    for (const anim of this.animations) anim.removeSlot(slot.name);
   }
 
   renameSlot(slot, newName) {
@@ -167,6 +192,7 @@ export class Skeleton {
     if (name === slot.name) return;
     if (this.findSlot(name)) throw new Error(`Un slot s'appelle déjà « ${name} ».`);
     for (const skin of this.skins) skin.renameSlot(slot.name, name);
+    for (const anim of this.animations) anim.renameSlot(slot.name, name);
     slot.name = name;
   }
 
@@ -238,6 +264,76 @@ export class Skeleton {
     att.name = name;
     this.defaultSkin.set(slot.name, name, att);
     if (slot.attachment === oldName) slot.attachment = name;
+    for (const anim of this.animations) anim.renameAttachment(slot.name, oldName, name);
+  }
+
+  // --- Animations -------------------------------------------------------------------
+
+  findAnimation(name) {
+    return this.animations.find((a) => a.name === name) ?? null;
+  }
+
+  uniqueAnimationName(base = 'animation') {
+    if (!this.findAnimation(base)) return base;
+    let i = 2;
+    while (this.findAnimation(`${base}${i}`)) i++;
+    return `${base}${i}`;
+  }
+
+  addAnimation(name, anim = new Animation(name)) {
+    const n = name.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (this.findAnimation(n)) throw new Error(`Une animation s'appelle déjà « ${n} ».`);
+    anim.name = n;
+    this.animations.push(anim);
+    return anim;
+  }
+
+  removeAnimation(anim) {
+    this.animations = this.animations.filter((a) => a !== anim);
+  }
+
+  renameAnimation(anim, newName) {
+    const n = newName.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (n === anim.name) return;
+    if (this.findAnimation(n)) throw new Error(`Une animation s'appelle déjà « ${n} ».`);
+    anim.name = n;
+  }
+
+  // --- Événements -----------------------------------------------------------------------
+
+  addEvent(name) {
+    const n = name.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (this.events.has(n)) throw new Error(`Un événement s'appelle déjà « ${n} ».`);
+    const e = new EventData(n);
+    this.events.set(n, e);
+    return e;
+  }
+
+  uniqueEventName(base = 'evenement') {
+    if (!this.events.has(base)) return base;
+    let i = 2;
+    while (this.events.has(`${base}${i}`)) i++;
+    return `${base}${i}`;
+  }
+
+  renameEvent(oldName, newName) {
+    const n = newName.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (n === oldName) return;
+    if (this.events.has(n)) throw new Error(`Un événement s'appelle déjà « ${n} ».`);
+    const e = this.events.get(oldName);
+    this.events.delete(oldName);
+    e.name = n;
+    this.events.set(n, e);
+    for (const anim of this.animations) anim.renameEvent(oldName, n);
+  }
+
+  removeEvent(name) {
+    this.events.delete(name);
+    for (const anim of this.animations) anim.removeEvent(name);
   }
 
   depthOf(bone) {
