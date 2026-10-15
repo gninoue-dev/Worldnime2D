@@ -159,9 +159,30 @@ après la dernière, la dernière valeur.
 `drawOrder.order` liste les slots du fond vers l'avant (`null` = ordre de la pose de base).
 Un slot absent de la liste (ajouté après coup) se place devant tous ceux qui le précèdent dans la pose de base.
 
-## Sections réservées
+## Contraintes : `ik`, `transform`, `path`, `physics`
 
-`ik`, `transform`, `path` et `physics` sont vides en v0.3. Elles seront remplies par les versions suivantes.
+Quatre listes d'objets `{ "name", "order", "bones": [...], "target", ...réglages }`, évaluées après
+l'animation dans l'ordre croissant de `order`.
+
+| Type | `target` | Réglages |
+|---|---|---|
+| `ik` | os cible | `mix`, `softness`, `bendPositive`, `compress`, `stretch`, `uniform` ; `bones` = 1 os, ou 2 os parent puis enfant direct |
+| `transform` | os cible | `mixRotate`, `mixX`, `mixY`, `mixScaleX`, `mixScaleY`, `mixShearY`, `offsetRotation`, `offsetX`, `offsetY`, `offsetScaleX`, `offsetScaleY`, `offsetShearY`, `local`, `relative` |
+| `path` | slot qui affiche un chemin | `positionMode` (`fixed`, `percent`), `spacingMode` (`length`, `fixed`, `percent`, `proportional`), `rotateMode` (`tangent`, `chain`, `chainScale`), `offsetRotation`, `position`, `spacing`, `mixRotate`, `mixX`, `mixY` |
+| `physics` | — | `x`, `y`, `rotate`, `scaleX`, `shearX` (part simulée, 0 à 1), `limit`, `step`, `inertia`, `strength`, `damping`, `mass`, `wind`, `gravity`, `mix` |
+
+### Chemins (`"type": "path"`)
+
+`vertices` : pour chaque point, poignée d'entrée, point, poignée de sortie (repère de l'os du slot),
+aplatis `[ix, iy, px, py, ox, oy, …]`. `closed` : le dernier point rejoint le premier.
+
+### Clés des contraintes (dans une animation)
+
+- `"ik": { nom: [ { time, mix, softness, bendPositive, compress, stretch, curve } ] }`
+- `"transform": { nom: [ { time, mixRotate, mixX, mixY, mixScaleX, mixScaleY, mixShearY, curve } ] }`
+- `"path": { nom: { "position": [ { time, position } ], "spacing": [ { time, spacing } ], "mix": [ { time, mixRotate, mixX, mixY } ] } }`
+- `"physics": { nom: [ { time, inertia, strength, damping, mass, wind, gravity, mix } ] }`
+- `"physicsReset": [ { time, name } ]` (`name` = `null` : toutes les contraintes physiques)
 
 ## Versions du format
 
@@ -169,6 +190,7 @@ Un slot absent de la liste (ajouté après coup) se place devant tous ceux qui l
 - `2` : v0.2, slots, skins, dossier d'images, image de référence.
 - `3` : v0.3, animations, événements, cadence de la timeline.
 - `4` : v0.5, maillages, maillages liés, poids, déformations animées.
+- `5` : v0.6, contraintes IK, transformation, chemin, physique ; pièces jointes chemin.
 
 Une version de l'éditeur lit tous les fichiers plus anciens. `formatVersion` augmente quand le format change. Une version de l'éditeur refuse un fichier
 dont le `formatVersion` est plus récent que ce qu'elle connaît.

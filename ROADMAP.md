@@ -52,13 +52,13 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Déformation libre (FFD) animable
 - [x] Maillages liés (linked meshes) qui partagent les poids
 
-## v0.6 — Contraintes
+## v0.6 — Contraintes ✅
 
-- [ ] IK à 1 ou 2 os : sens de pliage, mélange, souplesse, étirement, compression
-- [ ] Contrainte de transformation (copier rotation / position / échelle / cisaillement d'un autre os)
-- [ ] Contrainte de chemin (path) et pièce jointe « chemin »
-- [ ] Contrainte physique (ressorts, inertie, gravité, vent)
-- [ ] Ordre d'évaluation des contraintes
+- [x] IK à 1 ou 2 os : sens de pliage, mélange, souplesse, étirement, compression
+- [x] Contrainte de transformation (copier rotation / position / échelle / cisaillement d'un autre os)
+- [x] Contrainte de chemin (path) et pièce jointe « chemin »
+- [x] Contrainte physique (ressorts, inertie, gravité, vent)
+- [x] Ordre d'évaluation des contraintes
 
 ## v0.7 — Skins et autres pièces jointes
 

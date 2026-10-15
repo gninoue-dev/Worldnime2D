@@ -281,13 +281,18 @@ async function start() {
     const dt = Math.min(0.1, (now - lastFrame) / 1000);
     lastFrame = now;
     if (editor.playing) editor.step(dt);
+    // Physique en continu (hors lecture) : les os physiques se balancent quand on bouge le squelette.
+    // (Sauf pendant un geste en mode Animation sans clé automatique : la pose non enregistrée serait perdue.)
+    else if (editor.physicsLive && editor.hasPhysics && !(viewport.drag?.target && editor.animating && !editor.autoKey)) {
+      editor.stepPhysics(dt);
+    }
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
 
   editor.addEventListener('change', (e) => {
     const reason = e.detail.reason;
-    if (reason !== 'drag' && !(reason === 'time' && editor.playing)) refreshChrome();
+    if (reason !== 'drag' && reason !== 'physics' && !(reason === 'time' && editor.playing)) refreshChrome();
     if (['reset', 'undo', 'redo', 'cancel', 'saved'].includes(reason)) syncPaths().catch((err) => notify(err.message));
   });
   refreshChrome();

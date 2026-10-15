@@ -5,6 +5,7 @@ import { Slot } from './slot.js';
 import { Skin } from './skin.js';
 import { Animation, EventData } from './animation.js';
 import { MeshAttachment } from './mesh.js';
+import { CONSTRAINT_CLASSES } from './constraints.js';
 
 export const ROOT_NAME = 'root';
 
@@ -27,6 +28,11 @@ export class Skeleton {
     this.animations = [];
     this.events = new Map();
     this.fps = 30;
+    // Contraintes (IK, transformation, chemin, physique), évaluées selon leur « order ».
+    this.constraints = [];
+    // Horloge de la physique (secondes) et échelle de référence (pixels par mètre).
+    this.time = 0;
+    this.referenceScale = 100;
     this.skins = [new Skin('default')];
     this.addBone(ROOT_NAME, null);
   }
@@ -70,6 +76,11 @@ export class Skeleton {
     this.bones = this.bones.filter((b) => !doomed.has(b));
     for (const slot of this.slots.filter((sl) => doomed.has(sl.bone))) this.removeSlot(slot);
     for (const anim of this.animations) for (const b of doomed) anim.removeBone(b.name);
+    const names = new Set([...doomed].map((b) => b.name));
+    for (const c of [...this.constraints]) {
+      c.bones = c.bones.filter((n) => !names.has(n));
+      if (c.bones.length === 0 || (c.kind !== 'path' && c.kind !== 'physics' && names.has(c.target))) this.removeConstraint(c);
+    }
     return [...doomed];
   }
 
@@ -92,6 +103,10 @@ export class Skeleton {
     if (this.findBone(name)) throw new Error(`Un os s'appelle déjà « ${name} ».`);
     for (const anim of this.animations) anim.renameBone(bone.name, name);
     for (const m of this.meshes()) for (const list of m.att.weights ?? []) for (const e of list) if (e.bone === bone.name) e.bone = name;
+    for (const c of this.constraints) {
+      c.bones = c.bones.map((n) => (n === bone.name ? name : n));
+      if (c.kind !== 'path' && c.target === bone.name) c.target = name;
+    }
     bone.name = name;
   }
 
@@ -143,12 +158,73 @@ export class Skeleton {
   setToSetupPose() {
     for (const bone of this.bones) bone.setToSetupPose();
     for (const slot of this.slots) slot.setToSetupPose();
+    for (const c of this.constraints) c.setToSetupPose();
     this.drawOrder = [...this.slots];
   }
 
-  updateWorldTransform() {
+  // physics : 'pose' (par défaut : la physique est appliquée sans avancer), 'update' (avance jusqu'à
+  // this.time), 'reset' (repart de zéro) ou 'none' (sans physique).
+  updateWorldTransform(physics = 'pose') {
     if (!this.posed) this.setToSetupPose();
-    for (const bone of this.bones) bone.updateWorldTransform();
+    for (const bone of this.bones) {
+      bone.resetApplied();
+      bone.updateWorldTransform();
+    }
+    for (const c of this.sortedConstraints()) {
+      for (const b of c.apply(this, physics)) this.updateDescendants(b);
+    }
+  }
+
+  // Recalcule la matrice monde des descendants d'un os (et de l'os lui-même si self est vrai).
+  updateDescendants(bone, self = false) {
+    if (self) bone.updateWorldTransform();
+    for (const b of this.bones) if (bone.isAncestorOf(b)) b.updateWorldTransform();
+  }
+
+  sortedConstraints() {
+    return [...this.constraints].sort((a, b) => a.order - b.order);
+  }
+
+  // --- Contraintes ------------------------------------------------------------------------
+
+  findConstraint(name) {
+    return this.constraints.find((c) => c.name === name) ?? null;
+  }
+
+  uniqueConstraintName(base) {
+    if (!this.findConstraint(base)) return base;
+    let i = 2;
+    while (this.findConstraint(`${base}${i}`)) i++;
+    return `${base}${i}`;
+  }
+
+  addConstraint(kind, name) {
+    const n = name.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (this.findConstraint(n)) throw new Error(`Une contrainte s'appelle déjà « ${n} ».`);
+    const c = new CONSTRAINT_CLASSES[kind](n);
+    c.order = this.constraints.length ? Math.max(...this.constraints.map((x) => x.order)) + 1 : 0;
+    this.constraints.push(c);
+    return c;
+  }
+
+  removeConstraint(c) {
+    this.constraints = this.constraints.filter((x) => x !== c);
+    for (const anim of this.animations) anim.removeConstraint(c.kind, c.name);
+  }
+
+  renameConstraint(c, newName) {
+    const n = newName.trim();
+    if (!n) throw new Error('Le nom ne peut pas être vide.');
+    if (n === c.name) return;
+    if (this.findConstraint(n)) throw new Error(`Une contrainte s'appelle déjà « ${n} ».`);
+    for (const anim of this.animations) anim.renameConstraint(c.kind, c.name, n);
+    c.name = n;
+  }
+
+  // Remet la physique à zéro (une contrainte, ou toutes avec name = null).
+  resetPhysics(name = null) {
+    for (const c of this.constraints) if (c.kind === 'physics' && (!name || c.name === name)) c.resetState();
   }
 
   // Pièce jointe affichée dans la pose courante.
@@ -187,6 +263,7 @@ export class Skeleton {
     this.slots = this.slots.filter((s) => s !== slot);
     for (const skin of this.skins) skin.removeSlot(slot.name);
     for (const anim of this.animations) anim.removeSlot(slot.name);
+    for (const c of [...this.constraints]) if (c.kind === 'path' && c.target === slot.name) this.removeConstraint(c);
   }
 
   renameSlot(slot, newName) {
@@ -196,6 +273,7 @@ export class Skeleton {
     if (this.findSlot(name)) throw new Error(`Un slot s'appelle déjà « ${name} ».`);
     for (const skin of this.skins) skin.renameSlot(slot.name, name);
     for (const anim of this.animations) anim.renameSlot(slot.name, name);
+    for (const c of this.constraints) if (c.kind === 'path' && c.target === slot.name) c.target = name;
     slot.name = name;
   }
 

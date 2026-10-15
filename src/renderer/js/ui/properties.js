@@ -12,7 +12,9 @@ import { RegionAttachment } from '../model/attachment.js';
 import { MeshAttachment, meshFromRegion, uvToLocalMapping } from '../model/mesh.js';
 import { bindAuto, unbind, smoothWeights, pruneWeights, boundBones, DEFAULT_MAX_INFLUENCES } from '../model/weights.js';
 import { generateContour, addInteriorGrid, retriangulateMesh, resetToRectangle, setupPositions, setupWorld } from '../editor/meshtools.js';
-import { deformKey } from '../model/animation.js';
+import { deformKey, CONSTRAINT_TIMELINES } from '../model/animation.js';
+import { PathAttachment, straightPath } from '../model/path.js';
+import { CONSTRAINT_LABELS, POSITION_MODES, SPACING_MODES, ROTATE_MODES } from '../model/constraints.js';
 
 export class PropertiesPanel {
   constructor(editor, host, notify, actions) {
@@ -22,7 +24,9 @@ export class PropertiesPanel {
     this.actions = actions;
     this.signature = null;
     this.rows = [];
-    editor.addEventListener('change', () => this.refresh());
+    editor.addEventListener('change', (e) => {
+      if (e.detail.reason !== 'physics') this.refresh();
+    });
     this.refresh();
   }
 
@@ -62,6 +66,14 @@ export class PropertiesPanel {
     }
     out.push({ title: 'Squelette', rows: skel });
 
+    if (kind === 'constraint' && editor.constraint) {
+      const c = editor.constraint;
+      out.push({
+        title: `Contrainte ${CONSTRAINT_LABELS[c.kind]}${editor.animating ? ' — pose animée' : ''}`,
+        rows: editor.animating ? this.animConstraintRows(c) : this.constraintRows(c),
+      });
+      return out;
+    }
     if (editor.animating) {
       if (kind === 'bone') out.push({ title: 'Os — pose animée', rows: this.animBoneRows(editor.selected) });
       if (kind === 'slot') out.push({ title: 'Slot — pose animée', rows: this.animSlotRows(editor.selectedSlot) });
@@ -74,7 +86,9 @@ export class PropertiesPanel {
     }
     if (kind === 'bone') out.push({ title: 'Os', rows: this.boneRows(editor.selected) });
     if (kind === 'slot') out.push({ title: 'Slot', rows: this.slotRows(editor.selectedSlot) });
-    if (kind === 'attachment' && editor.attachment instanceof MeshAttachment) {
+    if (kind === 'attachment' && editor.attachment instanceof PathAttachment) {
+      out.push({ title: 'Chemin', rows: this.pathRows(editor.selectedSlot, editor.attachment) });
+    } else if (kind === 'attachment' && editor.attachment instanceof MeshAttachment) {
       out.push(...this.meshSections(editor.selectedSlot, editor.attachment));
     } else if (kind === 'attachment') {
       out.push({ title: 'Image (pièce jointe région)', rows: this.attachmentRows(editor.selectedSlot, editor.attachment) });
@@ -337,7 +351,229 @@ export class PropertiesPanel {
     if (sk.slotsOf(bone).length === 0) {
       rows.push({ type: 'button', label: '', text: () => 'Ajouter un slot vide à cet os', onClick: () => this.actions.addSlot(bone) });
     }
+    rows.push(
+      { type: 'button', label: '', text: () => '＋ Contrainte IK (crée un os cible au bout)', onClick: () => this.createConstraint('ik', bone) },
+      { type: 'button', label: '', text: () => '＋ Contrainte de transformation', onClick: () => this.createConstraint('transform', bone) },
+      { type: 'button', label: '', text: () => '＋ Contrainte de chemin (crée un chemin)', onClick: () => this.createConstraint('path', bone) },
+      { type: 'button', label: '', text: () => '＋ Contrainte physique', onClick: () => this.createConstraint('physics', bone) },
+      { type: 'button', label: '', text: () => '＋ Chemin (pièce jointe) sur cet os', onClick: () => this.change(() => {
+        const sk2 = this.editor.skeleton;
+        const slot = sk2.addSlot(sk2.uniqueSlotName(`${bone.name}_chemin`), bone);
+        sk2.addAttachment(slot, straightPath(slot.name, Math.max(100, bone.length * 2), 3));
+        slot.attachment = slot.name;
+        this.editor.selectedSlot = slot;
+        this.editor.selectedAttachment = slot.name;
+      }) },
+    );
     return rows;
+  }
+
+  // --- Contraintes ---------------------------------------------------------------------------
+
+  createConstraint(kind, bone) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    let created = null;
+    this.change(() => {
+      sk.updateWorldTransform();
+      const c = sk.addConstraint(kind, sk.uniqueConstraintName(`${bone.name}_${kind}`));
+      created = c.name;
+      if (kind === 'ik') {
+        // Os cible au bout de l'os, enfant de la racine ; chaîne de 2 os si l'os a un parent (hors racine).
+        const t = sk.addBone(sk.uniqueBoneName(`${bone.name}_cible`), sk.root);
+        const l = sk.root.worldToLocal(bone.tipX, bone.tipY);
+        t.x = l.x;
+        t.y = l.y;
+        t.color = '#ffd54f';
+        c.target = t.name;
+        c.bones = bone.parent && bone.parent.parent ? [bone.parent.name, bone.name] : [bone.name];
+      } else if (kind === 'transform') {
+        c.target = (bone.parent ?? sk.root).name;
+        c.bones = [bone.name];
+        // Mélanges à zéro : rien ne bouge tant qu'on ne les augmente pas.
+        for (const k of ['mixRotate', 'mixX', 'mixY', 'mixScaleX', 'mixScaleY', 'mixShearY']) c[k] = 0;
+      } else if (kind === 'path') {
+        // La chaîne : l'os puis son premier enfant, et ainsi de suite.
+        const chain = [bone];
+        while (chain.at(-1).children.length) chain.push(chain.at(-1).children[0]);
+        const total = chain.reduce((s, b) => s + Math.max(b.length * Math.hypot(b.a, b.c), 1), 0) * 1.2 || 200;
+        const slot = sk.addSlot(sk.uniqueSlotName(`${bone.name}_chemin`), sk.root, 0);
+        const p = new PathAttachment(slot.name);
+        const ang = Math.atan2(bone.c, bone.a);
+        const step = total / 2;
+        for (let i = 0; i < 3; i++) {
+          const w = [bone.worldX + Math.cos(ang) * step * i, bone.worldY + Math.sin(ang) * step * i];
+          const h = [Math.cos(ang) * step / 3, Math.sin(ang) * step / 3];
+          for (const [x, y] of [[w[0] - h[0], w[1] - h[1]], w, [w[0] + h[0], w[1] + h[1]]]) {
+            const loc = sk.root.worldToLocal(x, y);
+            p.vertices.push([loc.x, loc.y]);
+          }
+        }
+        sk.addAttachment(slot, p);
+        slot.attachment = slot.name;
+        c.target = slot.name;
+        c.bones = chain.map((b) => b.name);
+        c.rotateMode = 'chain';
+      } else {
+        c.bones = [bone.name];
+      }
+    });
+    if (created) ed.selectConstraint(created);
+  }
+
+  constraintRows(c) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    const set = (f) => (v) => this.change(() => { c[f] = v; });
+    const num = (f, label, step, unit) => ({ type: 'number', label, step, unit, get: () => c[f], set: set(f) });
+    const mix = (f, label) => ({ type: 'range', label, min: 0, max: 1, step: 0.01, get: () => c[f], set: set(f) });
+    const flag = (f, label) => ({ type: 'checkbox', label, get: () => c[f], set: set(f) });
+    const choice = (f, label, map) => ({ type: 'select', label, options: () => Object.entries(map), get: () => c[f], set: set(f) });
+    const rows = [
+      {
+        type: 'text', label: 'Nom', get: () => c.name,
+        set: (v) => {
+          this.change(() => sk.renameConstraint(c, v));
+          ed.selectConstraint(c.name);
+        },
+      },
+      { type: 'number', label: 'Ordre', step: 1, get: () => c.order, set: (v) => this.change(() => { c.order = Math.round(v); }) },
+      {
+        type: 'checklist', label: c.kind === 'ik' ? 'Os (1 ou 2)' : c.kind === 'physics' ? 'Os' : 'Os contraints',
+        options: () => sk.bones.filter((b) => b.name !== c.target).map((b) => [b.name, `${'\u00a0\u00a0'.repeat(sk.depthOf(b))}${b.name}`]),
+        get: () => c.bones,
+        set: (name, on) => this.change(() => {
+          let list = on ? [...c.bones, name] : c.bones.filter((n) => n !== name);
+          list = sk.bones.filter((b) => list.includes(b.name)).map((b) => b.name);
+          if (c.kind === 'physics' && list.length > 1) list = [name];
+          if (c.kind === 'ik') {
+            if (list.length > 2) throw new Error('Une contrainte IK porte sur 1 ou 2 os.');
+            if (list.length === 2 && sk.findBone(list[1]).parent?.name !== list[0]) {
+              throw new Error('Avec 2 os, le second doit être l\'enfant direct du premier.');
+            }
+          }
+          if (list.length === 0) throw new Error('Il faut au moins un os.');
+          c.bones = list;
+        }),
+      },
+    ];
+    if (c.kind === 'ik' || c.kind === 'transform') {
+      rows.push({
+        type: 'select', label: 'Cible',
+        options: () => sk.bones.filter((b) => !c.bones.includes(b.name) && !c.bones.some((n) => sk.findBone(n)?.isAncestorOf(b)))
+          .map((b) => [b.name, b.name]),
+        get: () => c.target, set: set('target'),
+      });
+    }
+    if (c.kind === 'path') {
+      rows.push({
+        type: 'select', label: 'Chemin (slot)',
+        options: () => sk.slots.filter((s) => [...sk.defaultSkin.attachmentsOf(s.name).values()].some((a) => a instanceof PathAttachment))
+          .map((s) => [s.name, s.name]),
+        get: () => c.target, set: set('target'),
+      });
+    }
+    if (c.kind === 'ik') {
+      rows.push(mix('mix', 'Mélange'), num('softness', 'Souplesse', 1), flag('bendPositive', 'Pliage positif'),
+        flag('compress', 'Compression'), flag('stretch', 'Étirement'), flag('uniform', 'Uniforme'));
+    } else if (c.kind === 'transform') {
+      rows.push(mix('mixRotate', 'Rotation'), mix('mixX', 'X'), mix('mixY', 'Y'), mix('mixScaleX', 'Échelle X'),
+        mix('mixScaleY', 'Échelle Y'), mix('mixShearY', 'Cisaillement Y'),
+        num('offsetRotation', 'Décalage rot.', 1, '°'), num('offsetX', 'Décalage X', 1), num('offsetY', 'Décalage Y', 1),
+        num('offsetScaleX', 'Décal. éch. X', 0.05), num('offsetScaleY', 'Décal. éch. Y', 0.05), num('offsetShearY', 'Décal. cis. Y', 1, '°'),
+        flag('local', 'Local'), flag('relative', 'Relatif'));
+    } else if (c.kind === 'path') {
+      rows.push(choice('positionMode', 'Position', POSITION_MODES), choice('spacingMode', 'Espacement', SPACING_MODES),
+        choice('rotateMode', 'Rotation', ROTATE_MODES),
+        num('position', 'Position', c.positionMode === 'percent' ? 0.01 : 1), num('spacing', 'Espacement', 1),
+        num('offsetRotation', 'Décalage rot.', 1, '°'),
+        mix('mixRotate', 'Mélange rot.'), mix('mixX', 'Mélange X'), mix('mixY', 'Mélange Y'));
+    } else if (c.kind === 'physics') {
+      rows.push(mix('x', 'Position X'), mix('y', 'Position Y'), mix('rotate', 'Rotation'), mix('scaleX', 'Échelle X'),
+        mix('shearX', 'Cisaillement X'),
+        num('inertia', 'Inertie', 0.05), num('strength', 'Raideur', 5), num('damping', 'Amortissement', 0.01),
+        num('mass', 'Masse', 0.1), num('wind', 'Vent', 0.5), num('gravity', 'Gravité', 0.5), mix('mix', 'Mélange'),
+        num('limit', 'Limite', 100),
+        {
+          type: 'select', label: 'Pas (IPS)', options: () => [30, 60, 120, 240].map((f) => [String(1 / f), `${f} images/s`]),
+          get: () => String(c.step), set: (v) => this.change(() => { c.step = Number(v); }),
+        },
+        { type: 'checkbox', label: 'En continu', get: () => ed.physicsLive, set: (v) => { ed.physicsLive = v; } },
+        { type: 'button', label: '', text: () => 'Remettre la simulation à zéro', onClick: () => ed.resetPhysics() });
+    }
+    rows.push({
+      type: 'button', label: '', text: () => '✕ Supprimer la contrainte',
+      onClick: () => {
+        this.change(() => sk.removeConstraint(c));
+        ed.selectedConstraint = null;
+        ed.emit('select');
+      },
+    });
+    return rows;
+  }
+
+  // Mode Animation : valeurs animables de la contrainte, avec clés.
+  animConstraintRows(c) {
+    const ed = this.editor;
+    const rows = [{ type: 'info', text: () => `« ${c.name} », image ${ed.frame} — ◆ clé ici, ◇ animée ailleurs.` }];
+    for (const [type, spec] of Object.entries(CONSTRAINT_TIMELINES[c.kind])) {
+      const key = { owner: c.kind, name: c.name, type };
+      const setter = (f) => (v) => this.change(() => {
+        c.pose[f] = v;
+        ed.keyConstraint(c, [type]);
+      });
+      for (const f of spec.numbers) {
+        const isMix = /^mix/.test(f) || f === 'mix';
+        rows.push(isMix
+          ? { type: 'range', label: f, min: 0, max: 1, step: 0.01, key, get: () => c.pose[f], set: setter(f) }
+          : { type: 'number', label: f, step: f === 'position' ? 0.01 : 1, key, get: () => c.pose[f], set: setter(f) });
+      }
+      for (const f of spec.flags) rows.push({ type: 'checkbox', label: f, key, get: () => c.pose[f], set: setter(f) });
+    }
+    if (c.kind === 'physics') {
+      rows.push({
+        type: 'button', label: '', text: () => 'Clé : remise à zéro de la simulation ici',
+        onClick: () => this.change(() => ed.animation.setKey('physicsReset', '', 'physicsReset', { time: ed.time, name: c.name })),
+      });
+    }
+    return rows;
+  }
+
+  pathRows(slot, p) {
+    const ed = this.editor;
+    const sk = ed.skeleton;
+    return [
+      {
+        type: 'text', label: 'Nom', get: () => p.name,
+        set: (v) => this.change(() => {
+          sk.renameAttachment(slot, p.name, v);
+          ed.selectedAttachment = v.trim();
+        }),
+      },
+      { type: 'info', text: () => `${p.pointCount} points. Glissez les points et les poignées dans la vue (Alt : poignées indépendantes).` },
+      { type: 'checkbox', label: 'Fermé', get: () => p.closed, set: (v) => this.change(() => { p.closed = v; }) },
+      { type: 'checkbox', label: 'Vitesse constante', get: () => p.constantSpeed, set: (v) => this.change(() => { p.constantSpeed = v; }) },
+      {
+        type: 'button', label: '', text: () => 'Ajouter un point à la fin',
+        onClick: () => this.change(() => {
+          const n = p.pointCount;
+          const last = p.vertices.slice((n - 1) * 3, n * 3);
+          const prev = n > 1 ? p.vertices[(n - 2) * 3 + 1] : [last[1][0] - 50, last[1][1]];
+          const dx = last[1][0] - prev[0];
+          const dy = last[1][1] - prev[1];
+          const pt = [last[1][0] + dx, last[1][1] + dy];
+          p.vertices.push([pt[0] - dx / 3, pt[1] - dy / 3], pt, [pt[0] + dx / 3, pt[1] + dy / 3]);
+        }),
+      },
+      {
+        type: 'button', label: '', text: () => 'Retirer le dernier point',
+        onClick: () => this.change(() => {
+          if (p.pointCount <= 2) throw new Error('Un chemin garde au moins 2 points.');
+          p.vertices.splice(-3, 3);
+        }),
+      },
+      ...colorRows(p, 'color', (fn) => this.change(fn)),
+    ];
   }
 
   // Mode Animation : valeurs de la pose courante ; toute modification pose une clé.
@@ -522,7 +758,8 @@ export class PropertiesPanel {
       editor.selectionKind, editor.selected?.name, editor.selectedSlot?.name, editor.selectedAttachment,
       Boolean(sk.reference), sk.slotsOf(editor.selected).length === 0, sk, editor.mode,
       editor.attachment, editor.attachment?.type, Boolean(editor.attachment?.weights), editor.attachment?.parent,
-      editor.selectedSlot && sk.currentAttachment(editor.selectedSlot)?.type,
+      editor.selectedSlot && sk.currentAttachment(editor.selectedSlot)?.type, editor.selectedConstraint,
+      editor.constraint?.kind, editor.constraint?.positionMode,
     ];
     const changed = !this.signature || sig.some((v, i) => v !== this.signature[i]);
     if (changed) this.build();

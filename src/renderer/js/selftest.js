@@ -145,6 +145,7 @@ export async function runSelftest({ editor, viewport, api, ...extra }) {
     if (extra.info?.selftestOra) await testV02({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     if (extra.info?.selftestOra) await testV03({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     if (extra.info?.selftestOra) await testV05({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
+    await testV06({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
   } catch (err) {
     check('exception', false, err.stack || err.message);
   }
@@ -730,4 +731,138 @@ async function testV05({ editor, viewport, api, check, near, pointer, dragWorld,
   const s2 = again.findSlot('torse');
   check('maillages enregistrés et relus', again.getAttachment(s2, 'torse').weights && again.getAttachment(s2, linked.name).parent === 'torse'
     && again.animations[0].deform.size === 1);
+}
+
+// --- v0.6 : contraintes -------------------------------------------------------------------------
+
+function setField(label, value) {
+  const row = [...document.querySelectorAll('.props .prop-row')].find((r) => r.querySelector('span')?.textContent.trim().endsWith(label));
+  if (!row) throw new Error(`Champ introuvable : ${label}`);
+  const input = row.querySelector('input, select');
+  if (input.type === 'checkbox') {
+    if (input.checked !== value) input.click();
+    return;
+  }
+  input.value = String(value);
+  input.dispatchEvent(new Event('input'));
+  input.dispatchEvent(new Event('change'));
+}
+
+async function testV06({ editor, viewport, api, check, near, dragWorld, library, setTab }) {
+  const sk = () => editor.skeleton;
+  const { Skeleton } = await import('./model/skeleton.js');
+  editor.setMode('setup');
+  editor.reset(new Skeleton());
+  await waitFor(() => library.dir === null);
+  setTab('tree');
+  editor.apply(() => {
+    const haut = sk().addBone('haut', sk().root);
+    haut.length = 100;
+    const bas = sk().addBone('bas', haut);
+    bas.x = 100;
+    bas.length = 100;
+  });
+  viewport.centerView();
+  viewport.zoom = 1.5;
+  viewport.render();
+
+  // 1. Contrainte IK créée depuis l'os « bas » : os cible au bout, chaîne de 2 os.
+  editor.select(sk().findBone('bas'));
+  await frame();
+  clickButton('Contrainte IK');
+  const ik = sk().constraints.find((c) => c.kind === 'ik');
+  check('IK : contrainte créée (2 os, cible au bout)', ik && ik.bones.join() === 'haut,bas' && sk().findBone(ik.target));
+  check('IK : visible dans l\'arbre', [...document.querySelectorAll('#tree .tree-label')].some((l) => l.textContent === ik.name));
+
+  // 2. On déplace la cible à la souris : le bout du bras la suit.
+  editor.setTool('translate');
+  const t = sk().findBone(ik.target);
+  await dragWorld([t.worldX, t.worldY], [120, 90]);
+  const bas = sk().findBone('bas');
+  check('IK : le bout du bras suit la cible', near(bas.tipX, 120, 1) && near(bas.tipY, 90, 1), `${bas.tipX.toFixed(1)}, ${bas.tipY.toFixed(1)}`);
+  check('IK : la pose de base des os ne change pas', sk().findBone('haut').rotation === 0 && bas.rotation === 0);
+  const elbow1 = bas.worldY;
+  editor.selectConstraint(ik.name);
+  await frame();
+  setField('Pliage positif', false);
+  check('IK : sens de pliage inversé', Math.abs(sk().findBone('bas').worldY - elbow1) > 10);
+  await frame();
+  await api.selftestCapture('16-ik');
+
+  // 3. Mode Animation : mélange à 0 avec une clé.
+  editor.setMode('animate');
+  editor.selectConstraint(ik.name);
+  await frame();
+  setField('mix', 0);
+  check('IK animée : clé de mélange', editor.keyState('ik', ik.name, 'ik') === 'key' && near(sk().findBone('bas').tipX, 200, 0.01));
+  editor.setMode('setup');
+
+  // 4. Contrainte de transformation : « bas » copie la rotation de la cible.
+  editor.select(sk().findBone('bas'));
+  await frame();
+  clickButton('Contrainte de transformation');
+  const tc = editor.constraint;
+  check('transformation : créée, sans effet tant que les mélanges sont à 0', tc?.kind === 'transform' && tc.mixRotate === 0);
+  editor.apply(() => sk().removeConstraint(tc));
+
+  // 5. Chemin : une chaîne de 3 os suit un chemin ; on déplace un point du chemin.
+  editor.apply(() => {
+    const c1 = sk().addBone('c1', sk().root);
+    c1.x = -150;
+    c1.y = -100;
+    c1.length = 40;
+    const c2 = sk().addBone('c2', c1);
+    c2.x = 40;
+    c2.length = 40;
+    const c3 = sk().addBone('c3', c2);
+    c3.x = 40;
+    c3.length = 40;
+  });
+  editor.select(sk().findBone('c1'));
+  await frame();
+  clickButton('Contrainte de chemin');
+  const pc = editor.constraint;
+  check('chemin : contrainte et chemin créés', pc?.kind === 'path' && pc.bones.join() === 'c1,c2,c3' && sk().findSlot(pc.target));
+  const pslot = sk().findSlot(pc.target);
+  const path = sk().getAttachment(pslot, pc.target);
+  editor.selectAttachment(pslot, path.name);
+  await frame();
+  const c3y0 = sk().findBone('c3').worldY;
+  const lastPt = path.worldVertices(pslot.bone)[4];
+  editor.setTool('select');
+  await dragWorld([lastPt[0], lastPt[1]], [lastPt[0], lastPt[1] + 120]);
+  check('chemin : déplacer un point du chemin courbe la chaîne', sk().findBone('c3').worldY > c3y0 + 5, `${c3y0} → ${sk().findBone('c3').worldY}`);
+  await frame();
+  await api.selftestCapture('17-chemin');
+
+  // 6. Physique : un os « queue » se balance quand son parent bouge.
+  editor.apply(() => {
+    const corps = sk().addBone('corps', sk().root);
+    corps.x = 200;
+    corps.y = -50;
+    const queue = sk().addBone('queue', corps);
+    queue.length = 80;
+  });
+  editor.select(sk().findBone('queue'));
+  await frame();
+  clickButton('Contrainte physique');
+  check('physique : contrainte créée', editor.constraint?.kind === 'physics');
+  editor.resetPhysics();
+  await wait(100);
+  editor.apply(() => {
+    sk().findBone('corps').y += 60;
+  });
+  let swing = 0;
+  for (let i = 0; i < 20; i++) {
+    await wait(25);
+    swing = Math.max(swing, Math.abs(sk().findBone('queue').worldRotationX));
+  }
+  check('physique : la queue se balance en direct', swing > 3, swing.toFixed(1));
+
+  // 7. Enregistrement et relecture.
+  const { parseProject } = await import('./model/format.js');
+  const again = parseProject(editor.toText());
+  check('contraintes enregistrées et relues', again.constraints.length === 3 && again.findConstraint(ik.name).bendPositive === false);
+  await frame();
+  await api.selftestCapture('18-contraintes');
 }

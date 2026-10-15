@@ -18,7 +18,7 @@ export class TreePanel {
     this.dragItem = null;
     editor.addEventListener('change', (e) => {
       const r = e.detail.reason;
-      if (r === 'drag' || r === 'keys' || (r === 'time' && editor.playing)) return;
+      if (r === 'drag' || r === 'keys' || r === 'physics' || (r === 'time' && editor.playing)) return;
       this.render();
     });
     this.render();
@@ -180,12 +180,14 @@ export class TreePanel {
           });
         });
         eye.addEventListener('dblclick', (e) => e.stopPropagation());
-        const missing = !this.actions.hasImage(att.imagePath);
+        const isPath = att.type === 'path';
+        const missing = !isPath && !this.actions.hasImage(att.imagePath);
+        const kindClass = isPath ? 'path-icon' : att.type === 'mesh' ? 'att-icon mesh' : 'att-icon';
         row({
           key: `a:${slot.name}/${name}`,
           depth: depth + 1,
-          label: missing ? `${name}  (image manquante)` : name,
-          icon: iconEl(missing ? 'att-icon missing' : 'att-icon'),
+          label: missing ? `${name}  (image manquante)` : att.parent ? `${name}  (lié à ${att.parent})` : name,
+          icon: iconEl(missing ? `${kindClass} missing` : kindClass),
           extra: eye,
           selected: editor.selectionKind === 'attachment' && editor.selectedSlot === slot && editor.selectedAttachment === name,
           hasChildren: false,
@@ -199,6 +201,35 @@ export class TreePanel {
     };
 
     addBone(sk.root, 0);
+
+    // Contraintes, dans leur ordre d'évaluation.
+    if (sk.constraints.length) {
+      const head = document.createElement('li');
+      head.className = 'tree-section';
+      head.textContent = 'Contraintes';
+      ul.appendChild(head);
+      const labels = { ik: 'IK', transform: 'Transf.', path: 'Chemin', physics: 'Physique' };
+      for (const c of sk.sortedConstraints()) {
+        const note = document.createElement('span');
+        note.className = 'tree-note';
+        note.textContent = labels[c.kind];
+        row({
+          key: `c:${c.name}`,
+          depth: 0,
+          label: c.name,
+          icon: iconEl(`constraint-icon ${c.kind}`),
+          extra: null,
+          selected: editor.selectedConstraint === c.name,
+          hasChildren: false,
+          onClick: () => editor.selectConstraint(c.name),
+          onRename: (name) => {
+            editor.apply(() => sk.renameConstraint(c, name));
+            editor.selectConstraint(c.name);
+          },
+        });
+        ul.lastChild.firstChild.appendChild(note);
+      }
+    }
     this.host.replaceChildren(ul);
     this.host.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
   }
@@ -249,7 +280,7 @@ export class DrawOrderPanel {
     this.dragSlot = null;
     editor.addEventListener('change', (e) => {
       const r = e.detail.reason;
-      if (r === 'drag' || r === 'keys' || (r === 'time' && editor.playing)) return;
+      if (r === 'drag' || r === 'keys' || r === 'physics' || (r === 'time' && editor.playing)) return;
       this.render();
     });
     this.render();

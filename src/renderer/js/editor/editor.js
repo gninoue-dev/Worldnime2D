@@ -3,7 +3,7 @@
 
 import { Skeleton } from '../model/skeleton.js';
 import { serializeProject, parseProject, projectToText } from '../model/format.js';
-import { TIME_EPSILON } from '../model/animation.js';
+import { TIME_EPSILON, CONSTRAINT_TIMELINES } from '../model/animation.js';
 
 const HISTORY_LIMIT = 200;
 
@@ -49,6 +49,9 @@ export class Editor extends EventTarget {
     this.brush = { radius: 40, strength: 0.25, bone: null };
     // Rayon doux (pixels écran) : les sommets voisins suivent le sommet déplacé.
     this.softRadius = 0;
+    // Simulation physique en continu dans la vue (contraintes physiques).
+    this.physicsLive = true;
+    this.selectedConstraint = null;
     // Clés sélectionnées dans la timeline : { owner, name, type, key }.
     this.selectedKeys = [];
     this.reset(new Skeleton());
@@ -65,6 +68,7 @@ export class Editor extends EventTarget {
     this.selected = skeleton.root;
     this.selectedSlot = null;
     this.selectedAttachment = null;
+    this.selectedConstraint = null;
     this.filePath = filePath;
     this.undoStack = [];
     this.redoStack = [];
@@ -99,11 +103,12 @@ export class Editor extends EventTarget {
       slot: this.selectedSlot?.name ?? null,
       attachment: this.selectedAttachment,
       animation: this.animationName,
+      constraint: this.selectedConstraint,
     });
   }
 
   restore(state) {
-    const { project, selected, slot, attachment, animation } = JSON.parse(state);
+    const { project, selected, slot, attachment, animation, constraint } = JSON.parse(state);
     this.skeleton = parseProject(JSON.stringify(project));
     this.selected = (selected && this.skeleton.findBone(selected)) || this.skeleton.root;
     this.selectedSlot = (slot && this.skeleton.findSlot(slot)) || null;
@@ -112,6 +117,7 @@ export class Editor extends EventTarget {
       : null;
     if (this.selectedSlot) this.selected = this.selectedSlot.bone;
     const sk = this.skeleton;
+    this.selectedConstraint = constraint && sk.findConstraint(constraint) ? constraint : null;
     this.animationName = (animation && sk.findAnimation(animation) && animation) || sk.animations[0]?.name || null;
     if (this.mode === 'animate' && !this.animationName) this.mode = 'setup';
     this.selectedKeys = [];
@@ -180,8 +186,9 @@ export class Editor extends EventTarget {
 
   // --- Sélection et outils ---------------------------------------------------
 
-  // Ce qui est sélectionné : 'bone', 'slot' ou 'attachment'.
+  // Ce qui est sélectionné : 'bone', 'slot', 'attachment' ou 'constraint'.
   get selectionKind() {
+    if (this.selectedConstraint) return 'constraint';
     if (this.selectedSlot && this.selectedAttachment) return 'attachment';
     if (this.selectedSlot) return 'slot';
     return 'bone';
@@ -193,15 +200,28 @@ export class Editor extends EventTarget {
     return this.skeleton.getAttachment(this.selectedSlot, this.selectedAttachment);
   }
 
+  get constraint() {
+    return this.selectedConstraint ? this.skeleton.findConstraint(this.selectedConstraint) : null;
+  }
+
   select(bone) {
-    if (this.selected === bone && !this.selectedSlot) return;
+    if (this.selected === bone && !this.selectedSlot && !this.selectedConstraint) return;
     this.selected = bone;
+    this.selectedSlot = null;
+    this.selectedAttachment = null;
+    this.selectedConstraint = null;
+    this.emit('select');
+  }
+
+  selectConstraint(name) {
+    this.selectedConstraint = name;
     this.selectedSlot = null;
     this.selectedAttachment = null;
     this.emit('select');
   }
 
   selectSlot(slot) {
+    this.selectedConstraint = null;
     this.selected = slot.bone;
     this.selectedSlot = slot;
     this.selectedAttachment = null;
@@ -209,6 +229,7 @@ export class Editor extends EventTarget {
   }
 
   selectAttachment(slot, name) {
+    this.selectedConstraint = null;
     this.selected = slot.bone;
     this.selectedSlot = slot;
     this.selectedAttachment = name;
@@ -234,7 +255,8 @@ export class Editor extends EventTarget {
   }
 
   // Recalcule la pose courante : pose de base (Configuration) ou animation au temps courant.
-  refreshPose(applyOptions = undefined) {
+  // physics : 'pose' (appliquer la simulation sans l'avancer), 'update' (l'avancer) ou 'reset'.
+  refreshPose(applyOptions = undefined, physics = 'pose') {
     const sk = this.skeleton;
     if (this.mode === 'animate') {
       sk.posed = true;
@@ -243,7 +265,36 @@ export class Editor extends EventTarget {
     } else {
       sk.posed = false;
     }
-    sk.updateWorldTransform();
+    sk.updateWorldTransform(physics);
+  }
+
+  get hasPhysics() {
+    return this.skeleton.constraints.some((c) => c.kind === 'physics');
+  }
+
+  // Avance la simulation physique de dt secondes (hors lecture).
+  stepPhysics(dt) {
+    this.skeleton.time += dt;
+    this.refreshPose(undefined, 'update');
+    this.emit('physics');
+  }
+
+  resetPhysics() {
+    this.skeleton.resetPhysics();
+    this.refreshPose(undefined, 'reset');
+    this.emit('physics');
+  }
+
+  // Écrit les clés d'une contrainte à partir de sa pose courante.
+  keyConstraint(c, types = Object.keys(CONSTRAINT_TIMELINES[c.kind])) {
+    const anim = this.animation;
+    if (!anim) return;
+    for (const type of types) {
+      const spec = CONSTRAINT_TIMELINES[c.kind][type];
+      const key = { time: this.time };
+      for (const f of [...spec.numbers, ...spec.flags]) key[f] = c.pose[f];
+      anim.setKey(c.kind, c.name, type, key);
+    }
   }
 
   setMeshTool(tool) {
@@ -307,6 +358,7 @@ export class Editor extends EventTarget {
       raw = duration;
       this.playing = false;
     }
+    this.skeleton.time += dt * this.speed;
     this.refreshPoseAt(raw, { loop: this.loop, lastTime: last, events });
     this.time = this.loop ? raw % duration : raw;
     this.emit('time');
@@ -320,6 +372,7 @@ export class Editor extends EventTarget {
     const end = this.range.end / this.fps;
     const last = Math.min(Math.max(this.time, start), end);
     let t = last + dt * this.speed;
+    this.skeleton.time += dt * this.speed;
     const events = [];
     if (t > end) {
       if (this.loop && end > start) t = start + ((t - end) % (end - start));
@@ -328,10 +381,10 @@ export class Editor extends EventTarget {
         this.playing = false;
       }
       this.time = t;
-      this.refreshPose();
+      this.refreshPose(undefined, 'update');
     } else {
       this.time = t;
-      this.refreshPose({ lastTime: last, events });
+      this.refreshPose({ lastTime: last, events }, 'update');
     }
     this.emit('time');
     if (events.length) this.dispatchEvent(new CustomEvent('events', { detail: events }));
@@ -351,7 +404,7 @@ export class Editor extends EventTarget {
   refreshPoseAt(rawTime, opts) {
     const keep = this.time;
     this.time = rawTime;
-    this.refreshPose(opts);
+    this.refreshPose(opts, 'update');
     this.time = keep;
   }
 

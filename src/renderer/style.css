@@ -323,3 +323,12 @@ body.animating .viewport { box-shadow: inset 0 0 0 2px rgba(229, 115, 115, 0.55)
 .checklist { max-height: 120px; overflow: auto; border: 1px solid var(--border); border-radius: 3px; background: var(--input); padding: 2px 4px; }
 .checklist label { display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; }
 .prop-row:has(.checklist) { align-items: start; }
+
+/* Arbre : maillages, chemins, contraintes */
+.att-icon.mesh { border-style: dashed; }
+.path-icon { width: 12px; height: 8px; flex: none; border-bottom: 2px solid #ff9800; border-radius: 0 0 8px 8px; }
+.tree-section { padding: 8px 10px 2px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
+.constraint-icon { width: 10px; height: 10px; flex: none; border-radius: 50%; border: 2px solid #ffd54f; }
+.constraint-icon.transform { border-color: #4dd0e1; border-radius: 2px; }
+.constraint-icon.path { border-color: #ff9800; }
+.constraint-icon.physics { border-color: #f06292; border-style: dotted; }

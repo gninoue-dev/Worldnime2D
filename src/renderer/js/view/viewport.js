@@ -13,6 +13,7 @@ import { AttachmentsView } from './attachments.js';
 import { MeshInteraction } from './meshinteraction.js';
 import { MeshAttachment } from '../model/mesh.js';
 import { meshUVAt } from '../model/geometry.js';
+import { PathAttachment, bezierPoint } from '../model/path.js';
 import { parseProject, serializeProject } from '../model/format.js';
 
 // Pelure d'oignon : images fantômes avant (rouge) et après (vert) l'instant courant.
@@ -402,6 +403,8 @@ export class Viewport {
       const att = sk.getAttachment(this.hover.slot, this.hover.name);
       if (att) this.strokeAttachment(g, this.hover.slot, att, COLORS.hover, 1);
     }
+    this.drawPaths(g);
+    this.drawConstraints(g);
     if (this.mesh.active()) this.mesh.draw(g);
     else if (editor.selectedSlot) {
       const att = editor.attachment ?? sk.currentAttachment(editor.selectedSlot);
@@ -429,6 +432,87 @@ export class Viewport {
       g.moveTo(o.x, o.y).lineTo(ax.x, ax.y).stroke({ width: 2, color: 0xe57373 });
       g.moveTo(o.x, o.y).lineTo(ay.x, ay.y).stroke({ width: 2, color: 0x81c784 });
     }
+  }
+
+  // Chemins : courbes orange ; points et poignées du chemin sélectionné (mode Configuration).
+  drawPaths(g) {
+    const editor = this.editor;
+    const sk = editor.skeleton;
+    for (const slot of sk.drawOrder) {
+      const att = sk.currentAttachment(slot);
+      if (!(att instanceof PathAttachment) || att.pointCount < 2) continue;
+      const selected = editor.attachment === att;
+      for (const curve of att.worldCurves(slot.bone)) {
+        const [p0, c1, c2, p1] = curve.map(([x, y]) => this.toScreen(x, y));
+        g.moveTo(p0.x, p0.y).bezierCurveTo(c1.x, c1.y, c2.x, c2.y, p1.x, p1.y);
+      }
+      g.stroke({ width: selected ? 2.5 : 1.5, color: selected ? COLORS.selected : 0xff9800 });
+      if (!selected || editor.animating) continue;
+      const w = att.worldVertices(slot.bone).map(([x, y]) => this.toScreen(x, y));
+      for (let k = 0; k < att.pointCount; k++) {
+        const [hi, p, ho] = [w[k * 3], w[k * 3 + 1], w[k * 3 + 2]];
+        g.moveTo(hi.x, hi.y).lineTo(ho.x, ho.y).stroke({ width: 1, color: 0xffffff, alpha: 0.5 });
+        g.circle(hi.x, hi.y, 3.5).fill({ color: 0xffffff });
+        g.circle(ho.x, ho.y, 3.5).fill({ color: 0xffffff });
+        g.rect(p.x - 4.5, p.y - 4.5, 9, 9).fill({ color: 0xff9800 }).stroke({ width: 1, color: 0x111111 });
+      }
+    }
+  }
+
+  // Repères des contraintes : lien IK vers la cible, os physiques.
+  drawConstraints(g) {
+    const editor = this.editor;
+    const sk = editor.skeleton;
+    if (!this.showBones) return;
+    for (const c of sk.constraints) {
+      const selected = editor.selectedConstraint === c.name;
+      if (c.kind === 'ik') {
+        const t = sk.findBone(c.target);
+        const last = sk.findBone(c.bones.at(-1));
+        if (!t || !last) continue;
+        const a = this.toScreen(last.tipX, last.tipY);
+        const b = this.toScreen(t.worldX, t.worldY);
+        const n = Math.max(1, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 8));
+        for (let i = 0; i < n; i += 2) {
+          g.moveTo(a.x + ((b.x - a.x) * i) / n, a.y + ((b.y - a.y) * i) / n)
+            .lineTo(a.x + ((b.x - a.x) * Math.min(n, i + 1)) / n, a.y + ((b.y - a.y) * Math.min(n, i + 1)) / n);
+        }
+        g.stroke({ width: selected ? 2 : 1, color: 0xffd54f, alpha: 0.9 });
+        g.circle(b.x, b.y, selected ? 11 : 9).stroke({ width: selected ? 2.5 : 1.5, color: 0xffd54f });
+      } else if (c.kind === 'physics') {
+        const b = sk.findBone(c.bones[0]);
+        if (!b) continue;
+        const s = this.toScreen(b.worldX, b.worldY);
+        g.circle(s.x, s.y, selected ? 10 : 8).stroke({ width: 1.5, color: 0xf06292, alpha: 0.9 });
+      } else if (selected) {
+        for (const n of c.bones) {
+          const b = sk.findBone(n);
+          if (!b) continue;
+          const s = this.toScreen(b.worldX, b.worldY);
+          g.circle(s.x, s.y, 9).stroke({ width: 2, color: c.kind === 'path' ? 0xff9800 : 0x4dd0e1 });
+        }
+      }
+    }
+  }
+
+  // Point ou poignée du chemin sélectionné sous le pointeur (indice dans vertices), ou -1.
+  pathVertexAt(sx, sy) {
+    const editor = this.editor;
+    const att = editor.attachment;
+    if (editor.animating || !(att instanceof PathAttachment)) return -1;
+    const w = att.worldVertices(editor.selectedSlot.bone);
+    let best = -1;
+    let bd = 9;
+    w.forEach(([x, y], i) => {
+      const s = this.toScreen(x, y);
+      // Les points passent avant les poignées.
+      const d = Math.hypot(s.x - sx, s.y - sy) - (i % 3 === 1 ? 2 : 0);
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    return best;
   }
 
   reportStatus() {
@@ -475,6 +559,19 @@ export class Viewport {
         if (!uv) continue;
         if (this.library.get(att.imagePath) && this.library.alphaAt(att.imagePath, uv[0], uv[1]) < ALPHA_HIT) continue;
         return { kind: 'attachment', slot, name: att.name };
+      }
+      if (att instanceof PathAttachment) {
+        // Un chemin se sélectionne en cliquant près de sa courbe.
+        const tol = 6 / this.zoom;
+        const near = att.worldCurves(slot.bone).some((curve) => {
+          for (let i = 0; i <= 24; i++) {
+            const [x, y] = bezierPoint(curve, i / 24);
+            if (Math.hypot(x - w.x, y - w.y) < tol) return true;
+          }
+          return false;
+        });
+        if (near) return { kind: 'attachment', slot, name: att.name };
+        continue;
       }
       if (!(att instanceof RegionAttachment)) continue;
       const v = att.worldVertices(slot.bone);
@@ -573,6 +670,15 @@ export class Viewport {
       return;
     }
 
+    // Chemin sélectionné : glisser un point (avec ses poignées) ou une poignée.
+    const pv = this.pathVertexAt(p.x, p.y);
+    if (pv >= 0) {
+      editor.begin();
+      const att = editor.attachment;
+      this.drag = { kind: 'pathvertex', index: pv, att, bone: editor.selectedSlot.bone, start: w, base: att.vertices.map((v) => [...v]), free: e.altKey };
+      return;
+    }
+
     if (editor.tool === TOOLS.select) {
       this.selectHit(this.hitTest(p.x, p.y));
       return;
@@ -625,6 +731,10 @@ export class Viewport {
 
     if (d?.kind === 'mesh') {
       this.mesh.move(p, w);
+      return;
+    }
+    if (d?.kind === 'pathvertex') {
+      this.movePathVertex(d, w, e);
       return;
     }
     if (!d && this.editor.meshTool && this.mesh.active()) {
@@ -731,6 +841,11 @@ export class Viewport {
       this.mesh.up();
       return;
     }
+    if (d.kind === 'pathvertex') {
+      this.editor.commit();
+      this.editor.emit('edit');
+      return;
+    }
 
     if (d.kind === 'create') {
       const editor = this.editor;
@@ -767,11 +882,51 @@ export class Viewport {
     this.render();
   }
 
+  movePathVertex(d, w) {
+    const b = d.bone;
+    const det = b.a * b.d - b.b * b.c || 1;
+    const dx = w.x - d.start.x;
+    const dy = w.y - d.start.y;
+    const lx = (b.d * dx - b.b * dy) / det;
+    const ly = (-b.c * dx + b.a * dy) / det;
+    const v = d.att.vertices;
+    const base = d.base;
+    const k = Math.floor(d.index / 3);
+    const role = d.index % 3;
+    v.forEach((p, i) => {
+      p[0] = base[i][0];
+      p[1] = base[i][1];
+    });
+    if (role === 1) {
+      // Point : il emmène ses deux poignées.
+      for (let i = k * 3; i < k * 3 + 3; i++) {
+        v[i][0] += lx;
+        v[i][1] += ly;
+      }
+    } else {
+      const h = v[d.index];
+      h[0] += lx;
+      h[1] += ly;
+      if (!d.free) {
+        // Poignée opposée symétrique (même direction, longueur conservée).
+        const pt = v[k * 3 + 1];
+        const o = v[k * 3 + (role === 0 ? 2 : 0)];
+        const len = Math.hypot(base[k * 3 + (role === 0 ? 2 : 0)][0] - pt[0], base[k * 3 + (role === 0 ? 2 : 0)][1] - pt[1]);
+        const ang = Math.atan2(pt[1] - h[1], pt[0] - h[0]);
+        o[0] = pt[0] + Math.cos(ang) * len;
+        o[1] = pt[1] + Math.sin(ang) * len;
+      }
+    }
+    this.editor.skeleton.updateWorldTransform();
+    this.editor.emit('drag');
+  }
+
   cancelDrag() {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
     if (d.kind === 'mesh') this.mesh.cancel();
+    else if (d.kind === 'pathvertex') this.editor.cancel();
     else if (d.kind !== 'pan' && d.kind !== 'create') this.editor.cancel();
     this.render();
   }

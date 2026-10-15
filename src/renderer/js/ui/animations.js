@@ -9,7 +9,7 @@ export class AnimationsPanel {
     this.notify = notify;
     this.selectedEvent = null;
     editor.addEventListener('change', (e) => {
-      if (!['drag', 'time', 'keys'].includes(e.detail.reason)) this.render();
+      if (!['drag', 'time', 'keys', 'physics'].includes(e.detail.reason)) this.render();
     });
     this.render();
   }

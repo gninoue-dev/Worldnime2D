@@ -15,6 +15,23 @@ import { round } from './math.js';
 export const BONE_TIMELINES = ['rotate', 'translate', 'scale', 'shear'];
 export const SLOT_TIMELINES = ['attachment', 'rgba', 'rgba2'];
 
+// Timelines des contraintes : propriétaire (type de contrainte) → types de timeline → champs.
+// Les champs numériques sont interpolés ; les booléens (IK) changent à la clé (palier).
+export const CONSTRAINT_TIMELINES = {
+  ik: { ik: { numbers: ['mix', 'softness'], flags: ['bendPositive', 'compress', 'stretch'] } },
+  transform: { transform: { numbers: ['mixRotate', 'mixX', 'mixY', 'mixScaleX', 'mixScaleY', 'mixShearY'], flags: [] } },
+  path: {
+    position: { numbers: ['position'], flags: [] },
+    spacing: { numbers: ['spacing'], flags: [] },
+    mix: { numbers: ['mixRotate', 'mixX', 'mixY'], flags: [] },
+  },
+  physics: { physics: { numbers: ['inertia', 'strength', 'damping', 'mass', 'wind', 'gravity', 'mix'], flags: [] } },
+};
+
+function constraintKey(owner, name, type) {
+  return JSON.stringify([owner, name, type]);
+}
+
 // Clé interne d'une timeline de déformation : skin, slot et pièce jointe.
 export function deformKey(slot, attachment, skin = 'default') {
   return JSON.stringify([skin, slot, attachment]);
@@ -28,6 +45,13 @@ export const TIMELINE_LABELS = {
   attachment: 'Pièce jointe',
   rgba: 'Couleur',
   rgba2: 'Couleur + sombre',
+  ik: 'IK',
+  transform: 'Transformation',
+  position: 'Position sur le chemin',
+  spacing: 'Espacement',
+  mix: 'Mélanges du chemin',
+  physics: 'Physique',
+  physicsReset: 'Physique : remise à zéro',
   drawOrder: 'Ordre d\'affichage',
   deform: 'Déformation',
   events: 'Événements',
@@ -59,6 +83,10 @@ export class Animation {
     this.drawOrder = [];
     // deformKey(slot, pièce jointe, skin) → clés { time, vertices: [décalages] }
     this.deform = new Map();
+    // constraintKey(type de contrainte, nom, type de timeline) → clés { time, champs… }
+    this.constraints = new Map();
+    // Clés { time, name } : remise à zéro de la physique (name = null : toutes les contraintes).
+    this.physicsReset = [];
     // Clés { time, name, int, float, string, volume, balance }
     this.events = [];
   }
@@ -68,6 +96,11 @@ export class Animation {
     for (const [name, tls] of this.bones) for (const [type, keys] of Object.entries(tls)) yield { owner: 'bone', name, type, keys };
     for (const [name, tls] of this.slots) for (const [type, keys] of Object.entries(tls)) yield { owner: 'slot', name, type, keys };
     for (const [name, keys] of this.deform) yield { owner: 'deform', name, type: 'deform', keys };
+    for (const [k, keys] of this.constraints) {
+      const [owner, name, type] = JSON.parse(k);
+      yield { owner, name, type, keys };
+    }
+    if (this.physicsReset.length) yield { owner: 'physicsReset', name: '', type: 'physicsReset', keys: this.physicsReset };
     if (this.drawOrder.length) yield { owner: 'drawOrder', name: '', type: 'drawOrder', keys: this.drawOrder };
     if (this.events.length) yield { owner: 'events', name: '', type: 'events', keys: this.events };
   }
@@ -91,6 +124,15 @@ export class Animation {
   timeline(owner, name, type, create = false) {
     if (owner === 'drawOrder') return this.drawOrder;
     if (owner === 'events') return this.events;
+    if (owner === 'physicsReset') return this.physicsReset;
+    if (CONSTRAINT_TIMELINES[owner]) {
+      const k = constraintKey(owner, name, type);
+      if (!this.constraints.has(k)) {
+        if (!create) return null;
+        this.constraints.set(k, []);
+      }
+      return this.constraints.get(k);
+    }
     if (owner === 'deform') {
       if (!this.deform.has(name)) {
         if (!create) return null;
@@ -143,6 +185,7 @@ export class Animation {
   // Retire les timelines vides.
   prune() {
     for (const [name, keys] of this.deform) if (keys.length === 0) this.deform.delete(name);
+    for (const [name, keys] of this.constraints) if (keys.length === 0) this.constraints.delete(name);
     for (const map of [this.bones, this.slots]) {
       for (const [name, tls] of map) {
         for (const type of Object.keys(tls)) if (tls[type].length === 0) delete tls[type];
@@ -181,6 +224,24 @@ export class Animation {
     this.remapDeform(([skin, slot, att]) => (slot === slotName && att === oldName ? [skin, slot, newName] : [skin, slot, att]));
   }
 
+  removeConstraint(kind, name) {
+    for (const k of [...this.constraints.keys()]) {
+      const [owner, n] = JSON.parse(k);
+      if (owner === kind && n === name) this.constraints.delete(k);
+    }
+    this.physicsReset = this.physicsReset.filter((k) => k.name !== name);
+  }
+
+  renameConstraint(kind, oldName, newName) {
+    const next = new Map();
+    for (const [k, keys] of this.constraints) {
+      const [owner, n, type] = JSON.parse(k);
+      next.set(owner === kind && n === oldName ? constraintKey(owner, newName, type) : k, keys);
+    }
+    this.constraints = next;
+    for (const k of this.physicsReset) if (k.name === oldName) k.name = newName;
+  }
+
   removeDeform(slotName, attName) {
     this.remapDeform(([skin, slot, att]) => (slot === slotName && att === attName ? null : [skin, slot, att]));
   }
@@ -213,6 +274,8 @@ export class Animation {
   // events : tableau qui reçoit les événements entre lastTime (exclu) et time (inclus).
   apply(skeleton, time, { alpha = 1, loop = false, lastTime = -1, events = null } = {}) {
     const duration = this.duration;
+    // Les remises à zéro de la physique ne se déclenchent que pendant la lecture (comme les événements).
+    const physicsResets = events ? { lastTime: loop && duration > 0 && lastTime >= 0 ? lastTime % duration : lastTime } : null;
     if (loop && duration > 0) {
       // time et lastTime peuvent dépasser la durée : on compte les tours de boucle.
       if (events) {
@@ -288,6 +351,26 @@ export class Animation {
         for (let i = 0; i < v.length; i++) p.deform[i] += (v[i] - p.deform[i]) * alpha;
       }
       p.deformFor = attName;
+    }
+
+    for (const [k, keys] of this.constraints) {
+      const [owner, name, type] = JSON.parse(k);
+      const c = skeleton.findConstraint(name);
+      if (!c || c.kind !== owner) continue;
+      const spec = CONSTRAINT_TIMELINES[owner][type];
+      const i = frameIndex(keys, time);
+      if (i < 0) continue;
+      const v = sample(keys, time, spec.numbers);
+      spec.numbers.forEach((f, j) => {
+        c.pose[f] += (v[j] - c.pose[f]) * alpha;
+      });
+      if (alpha >= 0.5) for (const f of spec.flags) if (keys[i][f] !== undefined) c.pose[f] = keys[i][f];
+    }
+
+    if (physicsResets && this.physicsReset.length) {
+      const resets = [];
+      collectEvents(this.physicsReset, physicsResets.lastTime, time, resets);
+      for (const r of resets) skeleton.resetPhysics(r.name ?? null);
     }
 
     if (this.drawOrder.length && alpha >= 0.5) {
@@ -430,6 +513,22 @@ export function animationToJSON(anim) {
       });
     }
   }
+  for (const [k, keys] of anim.constraints) {
+    const [owner, name, type] = JSON.parse(k);
+    const spec = CONSTRAINT_TIMELINES[owner][type];
+    out[owner] ??= {};
+    const list = keys.map((key) => {
+      const o = { time: round(key.time, 6) };
+      for (const f of spec.numbers) o[f] = round(key[f], 4);
+      for (const f of spec.flags) if (key[f] !== undefined) o[f] = key[f];
+      return curveOut(o, key);
+    });
+    if (owner === 'path') {
+      out.path[name] ??= {};
+      out.path[name][type] = list;
+    } else out[owner][name] = list;
+  }
+  if (anim.physicsReset.length) out.physicsReset = anim.physicsReset.map((k) => ({ time: round(k.time, 6), name: k.name ?? null }));
   if (anim.drawOrder.length) out.drawOrder = anim.drawOrder.map((k) => ({ time: round(k.time, 6), order: k.order }));
   if (anim.events.length) {
     out.events = anim.events.map((k) => {
@@ -503,6 +602,23 @@ export function animationFromJSON(name, data) {
       }
     }
   }
+  for (const owner of Object.keys(CONSTRAINT_TIMELINES)) {
+    for (const [cname, value] of Object.entries(data[owner] ?? {})) {
+      const byType = owner === 'path' ? value : { [owner]: value };
+      for (const [type, keys] of Object.entries(byType)) {
+        const spec = CONSTRAINT_TIMELINES[owner][type];
+        if (!spec || !Array.isArray(keys)) throw new Error(`Timeline de contrainte inconnue : ${owner}/${type} (${name}).`);
+        const where = `${name}/${owner}/${cname}`;
+        anim.constraints.set(constraintKey(owner, cname, type), keys.map((k) => {
+          const o = keyBase(k, where);
+          for (const f of spec.numbers) o[f] = num(k[f] ?? 0, `${f} (${where})`);
+          for (const f of spec.flags) if (k[f] !== undefined) o[f] = Boolean(k[f]);
+          return o;
+        }));
+      }
+    }
+  }
+  anim.physicsReset = (data.physicsReset ?? []).map((k) => ({ time: keyBase(k, `${name}/physicsReset`).time, name: k.name ?? null }));
   anim.drawOrder = (data.drawOrder ?? []).map((k) => {
     if (k.order !== null && !(Array.isArray(k.order) && k.order.every((n) => typeof n === 'string'))) {
       throw new Error(`Ordre d'affichage invalide (${name}).`);

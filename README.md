@@ -22,14 +22,26 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.5 — maillages et poids.** On construit un squelette, on y attache les images d'un
+> **État actuel : v0.6 — contraintes.** On construit un squelette, on y attache les images d'un
 > personnage (ou on importe un fichier Krita / Photoshop), on les transforme en maillages déformables liés
-> à plusieurs os, puis on anime avec une timeline à clés et un éditeur de courbes.
-> Les contraintes (IK…) arrivent dans la prochaine version.
+> à plusieurs os, on ajoute des contraintes (IK, transformation, chemin, physique), puis on anime avec
+> une timeline à clés et un éditeur de courbes. Les skins et l'export arrivent ensuite.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Contraintes (v0.6)
+
+- **IK** à 1 ou 2 os : création en un clic depuis un os (l'os cible est créé au bout), sens de pliage,
+  mélange, souplesse, étirement, compression
+- **Transformation** : copier la rotation, la position, l'échelle et le cisaillement d'un autre os,
+  en monde ou en local, absolu ou relatif, avec décalages
+- **Chemin** : pièce jointe « chemin » (courbe de Bézier, points et poignées modifiables à la souris,
+  ouverte ou fermée) ; une chaîne d'os la suit (position, espacement, rotation tangente ou en chaîne)
+- **Physique** : un os suit avec inertie (cheveux, tissus, queue) : raideur, amortissement, masse,
+  vent, gravité ; simulation en direct dans la vue
+- Ordre d'évaluation réglable ; mélanges et réglages animables (clés), remise à zéro de la physique par clé
 
 ### Maillages et poids (v0.5)
 

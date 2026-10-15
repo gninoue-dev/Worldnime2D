@@ -45,6 +45,9 @@ export class Bone {
     // Pose courante : la pose de base, modifiée par les animations et les contraintes.
     // C'est elle qui sert au calcul de la matrice monde.
     this.pose = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, shearX: 0, shearY: 0 };
+    // Valeurs appliquées : la pose courante, puis modifiée par les contraintes (IK, transformation…).
+    // C'est elle qui sert au calcul de la matrice monde.
+    this.ap = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, shearX: 0, shearY: 0 };
 
     // Matrice monde.
     this.a = 1;
@@ -66,8 +69,13 @@ export class Bone {
     p.shearY = this.shearY;
   }
 
+  // Les valeurs appliquées repartent de la pose courante.
+  resetApplied() {
+    Object.assign(this.ap, this.pose);
+  }
+
   updateWorldTransform() {
-    const { x, y, rotation, scaleX, scaleY, shearX, shearY } = this.pose;
+    const { x, y, rotation, scaleX, scaleY, shearX, shearY } = this.ap;
     const parent = this.parent;
 
     if (!parent) {
@@ -209,7 +217,50 @@ export class Bone {
   worldToLocalRotation(worldRotation) {
     const sin = sinDeg(worldRotation);
     const cos = cosDeg(worldRotation);
-    return atan2Deg(this.a * sin - this.c * cos, this.d * cos - this.b * sin) + this.pose.rotation - this.pose.shearX;
+    return atan2Deg(this.a * sin - this.c * cos, this.d * cos - this.b * sin) + this.ap.rotation - this.ap.shearX;
+  }
+
+  // Recalcule les valeurs appliquées à partir de la matrice monde (après une contrainte qui a
+  // modifié le monde directement). Valable pour l'héritage normal.
+  updateAppliedFromWorld() {
+    const ap = this.ap;
+    const p = this.parent;
+    let ra = this.a;
+    let rb = this.b;
+    let rc = this.c;
+    let rd = this.d;
+    if (!p) {
+      ap.x = this.worldX;
+      ap.y = this.worldY;
+    } else {
+      const det = p.a * p.d - p.b * p.c;
+      const pid = Math.abs(det) > 1e-9 ? 1 / det : 0;
+      const dx = this.worldX - p.worldX;
+      const dy = this.worldY - p.worldY;
+      ap.x = (dx * p.d - dy * p.b) * pid;
+      ap.y = (dy * p.a - dx * p.c) * pid;
+      const ia = pid * p.d;
+      const id = pid * p.a;
+      const ib = pid * p.b;
+      const ic = pid * p.c;
+      ra = ia * this.a - ib * this.c;
+      rb = ia * this.b - ib * this.d;
+      rc = id * this.c - ic * this.a;
+      rd = id * this.d - ic * this.b;
+    }
+    ap.shearX = 0;
+    ap.scaleX = Math.hypot(ra, rc);
+    if (ap.scaleX > 0.0001) {
+      const det = ra * rd - rb * rc;
+      ap.scaleY = det / ap.scaleX;
+      ap.shearY = -atan2Deg(ra * rb + rc * rd, det);
+      ap.rotation = atan2Deg(rc, ra);
+    } else {
+      ap.scaleX = 0;
+      ap.scaleY = Math.hypot(rb, rd);
+      ap.shearY = 0;
+      ap.rotation = 90 - atan2Deg(rd, rb);
+    }
   }
 
   // Coordonnées (dans le repère du parent) d'un point du monde.

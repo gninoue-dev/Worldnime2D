@@ -28,6 +28,13 @@ const TYPE_COLORS = {
   drawOrder: '#90a4ae',
   events: '#fff176',
   deform: '#4dd0e1',
+  ik: '#ffd54f',
+  transform: '#4dd0e1',
+  position: '#ff9800',
+  spacing: '#ffb74d',
+  mix: '#ffcc80',
+  physics: '#f06292',
+  physicsReset: '#f48fb1',
 };
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -47,6 +54,7 @@ export class TimelinePanel {
     this.graph = new GraphView(this);
     this.build();
     editor.addEventListener('change', (e) => {
+      if (e.detail.reason === 'physics') return;
       if (['time', 'drag'].includes(e.detail.reason)) {
         this.followPlayhead();
         this.draw();
@@ -226,6 +234,12 @@ export class TimelinePanel {
     rows.push({ kind: 'summary', label: 'Résumé', depth: 0, tls: all });
     rows.push({ kind: 'drawOrder', label: TIMELINE_LABELS.drawOrder, depth: 0, tls: anim.drawOrder.length ? [{ owner: 'drawOrder', name: '', type: 'drawOrder', keys: anim.drawOrder }] : [] });
     rows.push({ kind: 'events', label: TIMELINE_LABELS.events, depth: 0, tls: anim.events.length ? [{ owner: 'events', name: '', type: 'events', keys: anim.events }] : [] });
+    if (anim.physicsReset.length || sk.constraints.some((c) => c.kind === 'physics')) {
+      rows.push({
+        kind: 'physicsReset', label: TIMELINE_LABELS.physicsReset, depth: 0,
+        tls: anim.physicsReset.length ? [{ owner: 'physicsReset', name: '', type: 'physicsReset', keys: anim.physicsReset }] : [],
+      });
+    }
 
     for (const bone of sk.bones) {
       const tls = anim.bones.get(bone.name);
@@ -262,6 +276,19 @@ export class TimelinePanel {
         }
         for (const d of deforms) rows.push({ kind: 'sub', slot, label: d.label, depth: 1, type: 'deform', tls: [d] });
       }
+    }
+    // Contraintes animées (ou sélectionnée).
+    for (const c of sk.sortedConstraints()) {
+      const list = [...anim.constraints].filter(([k]) => {
+        const [owner, name] = JSON.parse(k);
+        return owner === c.kind && name === c.name;
+      }).map(([k, keys]) => {
+        const [owner, name, type] = JSON.parse(k);
+        return { owner, name, type, keys };
+      });
+      const selected = ed.selectedConstraint === c.name;
+      if (!list.length && !selected) continue;
+      rows.push({ kind: 'constraint', constraint: c, label: `◎ ${c.name}`, depth: 0, tls: list, selected });
     }
     return rows;
   }
@@ -555,6 +582,7 @@ export class TimelinePanel {
           this.draw();
         } else if (row.bone && row.kind === 'bone') ed.select(row.bone);
         else if (row.slot && row.kind === 'slot') ed.selectSlot(row.slot);
+        else if (row.kind === 'constraint') ed.selectConstraint(row.constraint.name);
         return;
       }
       // Clé sous le pointeur ?

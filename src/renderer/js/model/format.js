@@ -8,12 +8,14 @@ import { INHERIT, DEFAULT_BONE_COLOR } from './bone.js';
 import { BLEND_MODES } from './slot.js';
 import { RegionAttachment, ATTACHMENT_TYPES } from './attachment.js';
 import { MeshAttachment } from './mesh.js';
+import { PathAttachment } from './path.js';
+import { CONSTRAINT_CLASSES, CONSTRAINT_FIELDS } from './constraints.js';
 import { WHITE, isRgb, isRgba } from './color.js';
 import { round } from './math.js';
 import { animationToJSON, animationFromJSON, EventData } from './animation.js';
 
 export const FORMAT_NAME = 'worldnime2d';
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 export const FILE_EXTENSION = 'wn2d';
 
 export function serializeProject(skeleton, meta = {}) {
@@ -66,10 +68,7 @@ export function serializeProject(skeleton, meta = {}) {
       }
       return { name: skin.name, attachments };
     }),
-    ik: [],
-    transform: [],
-    path: [],
-    physics: [],
+    ...serializeConstraints(skeleton),
     events: Object.fromEntries([...skeleton.events.values()].map((e) => {
       const out = {};
       if (e.int) out.int = e.int;
@@ -86,8 +85,27 @@ export function serializeProject(skeleton, meta = {}) {
   };
 }
 
+function serializeConstraints(skeleton) {
+  const out = { ik: [], transform: [], path: [], physics: [] };
+  for (const c of skeleton.sortedConstraints()) {
+    const o = { name: c.name, order: c.order, bones: [...c.bones] };
+    if (c.kind !== 'physics') o.target = c.target;
+    for (const f of CONSTRAINT_FIELDS[c.kind]) o[f] = typeof c[f] === 'number' ? round(c[f], 5) : c[f];
+    out[c.kind].push(o);
+  }
+  return out;
+}
+
 function serializeAttachment(att) {
   if (att instanceof MeshAttachment) return serializeMesh(att);
+  if (att instanceof PathAttachment) {
+    const o = { type: 'path' };
+    if (att.closed) o.closed = true;
+    if (!att.constantSpeed) o.constantSpeed = false;
+    if (att.color !== '#ff7f00ff') o.color = att.color;
+    o.vertices = att.vertices.flatMap(([x, y]) => [round(x, 3), round(y, 3)]);
+    return o;
+  }
   const out = {};
   if (att.type !== ATTACHMENT_TYPES.region) out.type = att.type;
   if (att.path !== null) out.path = att.path;
@@ -227,6 +245,30 @@ export function parseProject(text) {
     if (!(p instanceof MeshAttachment) || p.parent) throw new Error(`Maillage parent introuvable pour « ${slotName}/${att.name} ».`);
   }
 
+  for (const kind of Object.keys(CONSTRAINT_CLASSES)) {
+    for (const cd of data[kind] ?? []) {
+      const where = `la contrainte « ${cd.name} »`;
+      if (typeof cd.name !== 'string' || !cd.name) throw new Error('Une contrainte n\'a pas de nom.');
+      const c = skeleton.addConstraint(kind, cd.name);
+      c.order = num(cd.order, c.order, `order (${where})`);
+      if (!Array.isArray(cd.bones) || cd.bones.some((b) => !skeleton.findBone(b))) throw new Error(`Os inconnu dans ${where}.`);
+      c.bones = [...cd.bones];
+      if (kind === 'path') {
+        if (!skeleton.findSlot(cd.target)) throw new Error(`Slot cible inconnu dans ${where}.`);
+        c.target = cd.target;
+      } else if (kind !== 'physics') {
+        if (!skeleton.findBone(cd.target)) throw new Error(`Os cible inconnu dans ${where}.`);
+        c.target = cd.target;
+      }
+      for (const f of CONSTRAINT_FIELDS[kind]) {
+        if (cd[f] === undefined) continue;
+        if (typeof c[f] === 'number') c[f] = num(cd[f], c[f], `${f} (${where})`);
+        else if (typeof c[f] === 'boolean') c[f] = Boolean(cd[f]);
+        else c[f] = String(cd[f]);
+      }
+    }
+  }
+
   const fps = data.skeleton?.fps;
   if (fps !== undefined) {
     if (typeof fps !== 'number' || !(fps > 0 && fps <= 240)) throw new Error('Cadence (fps) invalide.');
@@ -299,6 +341,18 @@ function parseMesh(name, ad, where, skeleton) {
 
 function parseAttachment(name, ad, where, skeleton) {
   const type = ad.type ?? ATTACHMENT_TYPES.region;
+  if (type === 'path') {
+    const p = new PathAttachment(name);
+    p.closed = ad.closed === true;
+    p.constantSpeed = ad.constantSpeed !== false;
+    if (ad.color !== undefined) {
+      if (!isRgba(ad.color)) throw new Error(`Couleur invalide pour ${where}.`);
+      p.color = ad.color.toLowerCase();
+    }
+    if (!Array.isArray(ad.vertices) || ad.vertices.length % 6) throw new Error(`Chemin invalide (${where}).`);
+    for (let i = 0; i < ad.vertices.length; i += 2) p.vertices.push([num(ad.vertices[i], 0, where), num(ad.vertices[i + 1], 0, where)]);
+    return p;
+  }
   if (type === 'mesh' || type === 'linkedmesh') return parseMesh(name, ad, where, skeleton);
   if (type !== ATTACHMENT_TYPES.region) throw new Error(`Type de pièce jointe non géré : ${type} (${where}).`);
   const att = new RegionAttachment(name);
