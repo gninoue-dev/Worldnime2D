@@ -144,6 +144,7 @@ export async function runSelftest({ editor, viewport, api, ...extra }) {
 
     if (extra.info?.selftestOra) await testV02({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
     if (extra.info?.selftestOra) await testV03({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
+    if (extra.info?.selftestOra) await testV05({ editor, viewport, api, check, near, pointer, dragWorld, ...extra });
   } catch (err) {
     check('exception', false, err.stack || err.message);
   }
@@ -535,4 +536,198 @@ async function testV03({ editor, viewport, api, check, near, dragWorld, library,
   document.querySelector('.mode-btn[data-mode="setup"]').click();
   await frame();
   check('retour en Configuration : pose de base, timeline cachée', near(cou().pose.rotation, 90) && document.getElementById('timeline').hidden);
+}
+
+// --- v0.5 : maillages et poids --------------------------------------------------------------
+
+function clickButton(text) {
+  const b = [...document.querySelectorAll('.props button')].find((x) => x.textContent.includes(text));
+  if (!b) throw new Error(`Bouton introuvable : ${text}`);
+  b.click();
+  return b;
+}
+
+async function testV05({ editor, viewport, api, check, near, pointer, dragWorld, library, importLayers, info, setTab }) {
+  const sk = () => editor.skeleton;
+  const { Skeleton } = await import('./model/skeleton.js');
+  const { MeshAttachment } = await import('./model/mesh.js');
+  editor.setMode('setup');
+  editor.reset(new Skeleton());
+  await waitFor(() => library.dir === null);
+  await importLayers(info.selftestOra, `${info.selftestDir}/images_mesh`);
+  setTab('tree');
+  viewport.frameAll();
+  const slot = () => sk().findSlot('torse');
+  const att = () => sk().getAttachment(slot(), 'torse');
+  editor.selectAttachment(slot(), 'torse');
+  await frame();
+  const regionVerts = Array.from(sk().attachmentVertices(slot(), att()));
+
+  // 1. Conversion en maillage : même place à l'écran.
+  clickButton('Convertir en maillage');
+  check('maillage : conversion depuis une image', att() instanceof MeshAttachment && att().vertexCount === 4);
+  const mv = sk().attachmentVertices(slot(), att());
+  check('maillage : même place que l\'image', regionVerts.every((v, i) => near(v, mv[i], 0.01)));
+
+  // 2. Contour automatique, points intérieurs.
+  await frame();
+  clickButton('Contour automatique');
+  check('maillage : contour automatique', att().hull > 4, att().hull);
+  await frame();
+  clickButton('points intérieurs');
+  check('maillage : points intérieurs', att().vertexCount > att().hull && att().triangles.length >= 3 * att().hull, att().vertexCount);
+  // L'image reste dessinée (pixels au centre du torse).
+  const c = (() => {
+    const v = sk().attachmentVertices(slot(), att());
+    let x = 0;
+    let y = 0;
+    for (let i = 0; i < v.length; i += 2) {
+      x += v[i];
+      y += v[i + 1];
+    }
+    return { x: (x * 2) / v.length + 13, y: (y * 2) / v.length + 9 };
+  })();
+  viewport.attachments.visible = false;
+  viewport.render();
+  const bg = pixelAt(viewport, c.x, c.y);
+  viewport.attachments.visible = true;
+  viewport.render();
+  const px = pixelAt(viewport, c.x, c.y);
+  check(`maillage : dessiné (${viewport.rendererName})`, Math.abs(px[0] - bg[0]) + Math.abs(px[1] - bg[1]) + Math.abs(px[2] - bg[2]) > 30, `${px} vs ${bg}`);
+
+  // 3. Outil « Modifier le maillage » : glisser un sommet, en ajouter un, en supprimer un.
+  clickButton('Modifier le maillage');
+  check('maillage : outil Modifier actif', editor.meshTool === 'edit');
+  editor.setTool('select');
+  const v0 = sk().attachmentVertices(slot(), att());
+  const vx = v0[0];
+  const vy = v0[1];
+  await dragWorld([vx, vy], [vx - 30, vy - 20]);
+  const v1 = sk().attachmentVertices(slot(), att());
+  check('maillage : glisser un sommet', near(v1[0], vx - 30, 0.5) && near(v1[1], vy - 20, 0.5), `${v1[0]},${v1[1]}`);
+  const count = att().vertexCount;
+  pointer('pointerdown', c.x + 3, c.y - 25);
+  pointer('pointerup', c.x + 3, c.y - 25);
+  check('maillage : clic = nouveau sommet', att().vertexCount === count + 1);
+  const added = sk().attachmentVertices(slot(), att());
+  const ai = [...viewport.mesh.selected][0];
+  pointer('pointerdown', added[ai * 2], added[ai * 2 + 1], { altKey: true });
+  pointer('pointerup', added[ai * 2], added[ai * 2 + 1], { altKey: true });
+  check('maillage : Alt + clic = supprimer le sommet', att().vertexCount === count);
+  // Ctrl + clic sur deux sommets du contour non voisins : arête imposée.
+  const ev = sk().attachmentVertices(slot(), att());
+  const h = att().hull;
+  const ea = 0;
+  const eb = Math.floor(h / 2);
+  pointer('pointerdown', ev[ea * 2], ev[ea * 2 + 1], { ctrlKey: true });
+  pointer('pointerup', ev[ea * 2], ev[ea * 2 + 1], { ctrlKey: true });
+  pointer('pointerdown', ev[eb * 2], ev[eb * 2 + 1], { ctrlKey: true });
+  pointer('pointerup', ev[eb * 2], ev[eb * 2 + 1], { ctrlKey: true });
+  check('maillage : Ctrl + clic = arête', att().edges.length === 1);
+  editor.setMeshTool('edit');
+
+  // 4. Deux os le long du torse, liaison automatique.
+  const box = (() => {
+    const v = sk().attachmentVertices(slot(), att());
+    const ys = [];
+    for (let i = 1; i < v.length; i += 2) ys.push(v[i]);
+    return { top: Math.max(...ys), bottom: Math.min(...ys) };
+  })();
+  editor.apply(() => {
+    const haut = sk().addBone('torse_bas', sk().root);
+    haut.x = c.x;
+    haut.y = box.bottom;
+    haut.rotation = 90;
+    haut.length = (box.top - box.bottom) / 2;
+    const bas = sk().addBone('torse_haut', haut);
+    bas.x = haut.length;
+    bas.length = haut.length;
+  });
+  editor.selectAttachment(slot(), 'torse');
+  await frame();
+  const boxes = [...document.querySelectorAll('.checklist input')];
+  for (const cb of boxes) {
+    if (['torse_bas', 'torse_haut'].includes(cb.value) !== cb.checked) cb.click();
+  }
+  const before = Array.from(sk().attachmentVertices(slot(), att()));
+  clickButton('Lier aux os cochés');
+  check('poids : liaison automatique', Boolean(att().weights) && att().weights.every((l) => l.length >= 1));
+  const after = sk().attachmentVertices(slot(), att());
+  check('poids : le maillage ne bouge pas à la liaison', before.every((v, i) => near(v, after[i], 0.05)));
+  // On plie l'os du haut : le haut du torse suit, le bas reste.
+  editor.apply(() => {
+    sk().findBone('torse_haut').rotation = 40;
+  });
+  const bent = sk().attachmentVertices(slot(), att());
+  let topMoved = 0;
+  let bottomMoved = 0;
+  for (let i = 0; i < bent.length; i += 2) {
+    const d = Math.hypot(bent[i] - before[i], bent[i + 1] - before[i + 1]);
+    if (before[i + 1] > box.top - 30) topMoved = Math.max(topMoved, d);
+    if (before[i + 1] < box.bottom + 30) bottomMoved = Math.max(bottomMoved, d);
+  }
+  check('poids : le maillage suit les os', topMoved > 20 && bottomMoved < topMoved / 3, `haut ${topMoved.toFixed(1)}, bas ${bottomMoved.toFixed(1)}`);
+  await frame();
+  await wait(50);
+  await api.selftestCapture('13-maillage-poids');
+  editor.undo();
+
+  // 5. Pinceau de poids, lissage, élagage.
+  editor.selectAttachment(slot(), 'torse');
+  await frame();
+  editor.brush.bone = 'torse_haut';
+  clickButton('Peindre les poids');
+  check('poids : outil pinceau actif', editor.meshTool === 'weights');
+  const wOf = (i, b) => att().weights[i].find((e) => e.bone === b)?.w ?? 0;
+  const vb = sk().attachmentVertices(slot(), att());
+  let lowest = 0;
+  for (let i = 1; i < vb.length / 2; i++) if (vb[i * 2 + 1] < vb[lowest * 2 + 1]) lowest = i;
+  const w0 = wOf(lowest, 'torse_haut');
+  await dragWorld([vb[lowest * 2] - 5, vb[lowest * 2 + 1]], [vb[lowest * 2] + 5, vb[lowest * 2 + 1]]);
+  check('poids : le pinceau augmente le poids', wOf(lowest, 'torse_haut') > w0 + 0.05, `${w0} → ${wOf(lowest, 'torse_haut')}`);
+  await frame();
+  await api.selftestCapture('14-pinceau-poids');
+  editor.setMeshTool('weights');
+  clickButton('Lisser les poids');
+  clickButton('Élaguer');
+  check('poids : lissés et élagués, normalisés', att().weights.every((l) => Math.abs(l.reduce((s2, e) => s2 + e.w, 0) - 1) < 1e-3 && l.every((e) => e.w >= 0.049)));
+
+  // 6. Mode Animation : déformation libre (FFD) avec clé.
+  editor.setMode('animate');
+  editor.selectSlot(slot());
+  await frame();
+  clickButton('Déformer le maillage');
+  check('déformation : outil actif', editor.meshTool === 'deform');
+  editor.setFrame(10);
+  const d0 = sk().attachmentVertices(slot(), att());
+  await dragWorld([d0[0], d0[1]], [d0[0] + 25, d0[1] + 10]);
+  const d1 = sk().attachmentVertices(slot(), att());
+  check('déformation : le sommet suit la souris', near(d1[0], d0[0] + 25, 0.5) && near(d1[1], d0[1] + 10, 0.5), `${d1[0] - d0[0]}`);
+  const dk = [...editor.animation.deform.values()][0];
+  check('déformation : clé posée', dk?.length === 1 && near(dk[0].time, 10 / 30, 1e-6));
+  editor.setFrame(0);
+  const atZero = sk().attachmentVertices(slot(), att());
+  check('déformation : animée (avant la clé : forme d\'origine)', !near(atZero[0], d1[0], 1));
+  editor.setFrame(10);
+  await frame();
+  await api.selftestCapture('15-deformation');
+  editor.setMeshTool('deform');
+  editor.setMode('setup');
+
+  // 7. Maillage lié.
+  editor.selectAttachment(slot(), 'torse');
+  await frame();
+  clickButton('Créer un maillage lié');
+  const linked = editor.attachment;
+  check('maillage lié : créé et sélectionné', linked?.parent === 'torse');
+  const lv = sk().attachmentVertices(slot(), linked);
+  const pv = sk().attachmentVertices(slot(), att());
+  check('maillage lié : même géométrie que le parent', lv.length === pv.length && lv.every((v, i) => near(v, pv[i], 1e-3)));
+
+  // 8. Enregistrement et relecture.
+  const { parseProject } = await import('./model/format.js');
+  const again = parseProject(editor.toText());
+  const s2 = again.findSlot('torse');
+  check('maillages enregistrés et relus', again.getAttachment(s2, 'torse').weights && again.getAttachment(s2, linked.name).parent === 'torse'
+    && again.animations[0].deform.size === 1);
 }

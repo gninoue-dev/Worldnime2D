@@ -10,6 +10,9 @@ import { TOOLS } from '../editor/editor.js';
 import { atan2Deg, wrapDeg, distToSegment } from '../model/math.js';
 import { RegionAttachment, quadContains } from '../model/attachment.js';
 import { AttachmentsView } from './attachments.js';
+import { MeshInteraction } from './meshinteraction.js';
+import { MeshAttachment } from '../model/mesh.js';
+import { meshUVAt } from '../model/geometry.js';
 import { parseProject, serializeProject } from '../model/format.js';
 
 // Pelure d'oignon : images fantômes avant (rouge) et après (vert) l'instant courant.
@@ -70,6 +73,7 @@ export class Viewport {
     this.ghostViews = [];
     // Événements déclenchés pendant la lecture : { name, until }.
     this.flashes = [];
+    this.mesh = new MeshInteraction(this);
   }
 
   async init(preference = 'webgl') {
@@ -162,9 +166,9 @@ export class Viewport {
     }
     for (const slot of sk.drawOrder) {
       const att = sk.currentAttachment(slot);
-      if (!(att instanceof RegionAttachment)) continue;
-      const v = att.worldVertices(slot.bone);
-      for (let i = 0; i < 8; i += 2) add(v[i], v[i + 1]);
+      if (!(att instanceof RegionAttachment) && !(att instanceof MeshAttachment)) continue;
+      const v = sk.attachmentVertices(slot, att);
+      for (let i = 0; i < v.length; i += 2) add(v[i], v[i + 1]);
     }
     const w = Math.max(maxX - minX, 100);
     const h = Math.max(maxY - minY, 100);
@@ -364,8 +368,20 @@ export class Viewport {
     return this.labelPool[i];
   }
 
-  // Contour d'une image à l'écran.
+  // Contour d'une image à l'écran (le contour extérieur pour un maillage).
   strokeAttachment(g, slot, att, color, width) {
+    if (att instanceof MeshAttachment) {
+      const sk = this.editor.skeleton;
+      const src = sk.meshSource(slot, att);
+      const v = sk.attachmentVertices(slot, att);
+      const pts = [];
+      for (let i = 0; i < src.hull; i++) {
+        const s = this.toScreen(v[i * 2], v[i * 2 + 1]);
+        pts.push(s.x, s.y);
+      }
+      if (pts.length >= 6) g.poly(pts).stroke({ width, color });
+      return;
+    }
     const v = att.worldVertices(slot.bone);
     const pts = [];
     for (let i = 0; i < 8; i += 2) {
@@ -386,10 +402,13 @@ export class Viewport {
       const att = sk.getAttachment(this.hover.slot, this.hover.name);
       if (att) this.strokeAttachment(g, this.hover.slot, att, COLORS.hover, 1);
     }
-    if (editor.selectedSlot) {
+    if (this.mesh.active()) this.mesh.draw(g);
+    else if (editor.selectedSlot) {
       const att = editor.attachment ?? sk.currentAttachment(editor.selectedSlot);
-      if (att instanceof RegionAttachment) {
+      if (att instanceof RegionAttachment || att instanceof MeshAttachment) {
         this.strokeAttachment(g, editor.selectedSlot, att, editor.attachment ? COLORS.selected : COLORS.attachment, 2);
+        // Maillage sélectionné : ses triangles, pour voir sa structure.
+        if (att instanceof MeshAttachment && editor.attachment === att) this.mesh.drawMesh(g, editor.selectedSlot, att);
       }
     }
 
@@ -450,6 +469,13 @@ export class Viewport {
     for (let i = sk.drawOrder.length - 1; i >= 0; i--) {
       const slot = sk.drawOrder[i];
       const att = sk.currentAttachment(slot);
+      if (att instanceof MeshAttachment) {
+        const src = sk.meshSource(slot, att);
+        const uv = meshUVAt(sk.attachmentVertices(slot, att), src.triangles, src.uvs, w.x, w.y);
+        if (!uv) continue;
+        if (this.library.get(att.imagePath) && this.library.alphaAt(att.imagePath, uv[0], uv[1]) < ALPHA_HIT) continue;
+        return { kind: 'attachment', slot, name: att.name };
+      }
       if (!(att instanceof RegionAttachment)) continue;
       const v = att.worldVertices(slot.bone);
       if (!quadContains(v, w.x, w.y)) continue;
@@ -541,6 +567,12 @@ export class Viewport {
 
     const editor = this.editor;
 
+    // Outil de maillage actif : la souris agit sur les sommets.
+    if (editor.meshTool && this.mesh.active() && this.mesh.down(p, w, e)) {
+      this.drag = { kind: 'mesh' };
+      return;
+    }
+
     if (editor.tool === TOOLS.select) {
       this.selectHit(this.hitTest(p.x, p.y));
       return;
@@ -561,8 +593,13 @@ export class Viewport {
 
     // Outils de transformation : un clic sélectionne, puis le glisser transforme la sélection.
     this.selectHit(this.hitTest(p.x, p.y));
+    if (editor.attachment instanceof MeshAttachment && (editor.attachment.weights || editor.attachment.parent) && editor.selectionKind === 'attachment') {
+      this.notify?.('Un maillage avec des poids suit ses os : modifiez ses sommets avec « Modifier le maillage ».');
+      return;
+    }
     const target = editor.selectionKind === 'attachment'
-      ? attachmentTarget(editor.selectedSlot, editor.attachment)
+      ? (editor.attachment instanceof MeshAttachment ? meshTarget(editor.selectedSlot, editor.attachment)
+        : attachmentTarget(editor.selectedSlot, editor.attachment))
       : editor.selectionKind === 'bone' ? boneTarget(editor.selected, editor.animating) : null;
     if (!target) return;
     if (editor.tool === TOOLS.shear && !target.canShear) return;
@@ -585,6 +622,16 @@ export class Viewport {
     const w = this.toWorld(p.x, p.y);
     this.mouseWorld = w;
     const d = this.drag;
+
+    if (d?.kind === 'mesh') {
+      this.mesh.move(p, w);
+      return;
+    }
+    if (!d && this.editor.meshTool && this.mesh.active()) {
+      this.mesh.move(p, w);
+      this.reportStatus();
+      return;
+    }
 
     if (!d) {
       const hit = this.hitTest(p.x, p.y);
@@ -680,6 +727,11 @@ export class Viewport {
 
     if (d.kind === 'pan') return;
 
+    if (d.kind === 'mesh') {
+      this.mesh.up();
+      return;
+    }
+
     if (d.kind === 'create') {
       const editor = this.editor;
       const parent = d.parent;
@@ -719,7 +771,8 @@ export class Viewport {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
-    if (d.kind !== 'pan' && d.kind !== 'create') this.editor.cancel();
+    if (d.kind === 'mesh') this.mesh.cancel();
+    else if (d.kind !== 'pan' && d.kind !== 'create') this.editor.cancel();
     this.render();
   }
 
@@ -765,6 +818,50 @@ function boneTarget(bone, animating = false) {
       v.shearX = shx;
       v.shearY = shy;
     },
+  };
+}
+
+// Maillage sans poids transformé en bloc autour de son centre (rotation, déplacement, échelle).
+function meshTarget(slot, mesh) {
+  const bone = slot.bone;
+  const base = mesh.vertices.map((v) => [...v]);
+  const cx = base.reduce((s, v) => s + v[0], 0) / base.length;
+  const cy = base.reduce((s, v) => s + v[1], 0) / base.length;
+  const st = { rotation: 0, scaleX: 1, scaleY: 1, ox: 0, oy: 0 };
+  const apply = () => {
+    const r = (st.rotation * Math.PI) / 180;
+    const cos = Math.cos(r);
+    const sin = Math.sin(r);
+    mesh.vertices = base.map(([x, y]) => {
+      const dx = (x - cx) * st.scaleX;
+      const dy = (y - cy) * st.scaleY;
+      return [cx + st.ox + dx * cos - dy * sin, cy + st.oy + dx * sin + dy * cos];
+    });
+  };
+  return {
+    canShear: false,
+    flip: determinantSign(bone),
+    frame: () => {
+      const c = bone.localToWorld(cx + st.ox, cy + st.oy);
+      return { x: c.x, y: c.y, ax: bone.a, ay: bone.c, bx: bone.b, by: bone.d };
+    },
+    save: () => ({ rotation: st.rotation, scaleX: st.scaleX, scaleY: st.scaleY }),
+    setRotation: (r) => {
+      st.rotation = r;
+      apply();
+    },
+    setWorldPosition: (x, y) => {
+      const l = bone.worldToLocal(x, y);
+      st.ox = l.x - cx;
+      st.oy = l.y - cy;
+      apply();
+    },
+    setScale: (sx, sy) => {
+      st.scaleX = sx;
+      st.scaleY = sy;
+      apply();
+    },
+    setShear: () => {},
   };
 }
 

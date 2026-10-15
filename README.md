@@ -22,13 +22,27 @@ C'est un gros chantier, alors j'avance par étapes. La liste complète est dans 
 Je construis ce projet pour apprendre (Electron, rendu WebGL avec PixiJS, mathématiques des transformations 2D)
 et parce que j'en ai besoin pour mes propres jeux.
 
-> **État actuel : v0.4 — courbes.** On construit un squelette, on y attache les images d'un personnage
-> (ou on importe directement un fichier Krita / Photoshop), puis on l'anime avec une timeline à clés
-> et un éditeur de courbes. Les maillages et les contraintes arrivent dans les prochaines versions.
+> **État actuel : v0.5 — maillages et poids.** On construit un squelette, on y attache les images d'un
+> personnage (ou on importe un fichier Krita / Photoshop), on les transforme en maillages déformables liés
+> à plusieurs os, puis on anime avec une timeline à clés et un éditeur de courbes.
+> Les contraintes (IK…) arrivent dans la prochaine version.
 
 ![Capture de Worldnime2D](docs/capture.png)
 
 ## Ce que fait Worldnime2D aujourd'hui
+
+### Maillages et poids (v0.5)
+
+- **Maillages** : une image convertie en maillage se déforme triangle par triangle
+- Contour automatique d'après la transparence de l'image, points intérieurs en grille, triangulation de Delaunay
+- Outil **Modifier le maillage** : glisser les sommets (avec rayon doux), clic = nouveau sommet
+  (intérieur ou sur le contour), Alt + clic = supprimer, Ctrl + clic sur deux sommets = arête imposée
+- **Poids** : liaison à plusieurs os avec poids automatiques, pinceau de poids (carte de couleurs),
+  lissage, élagage, nombre maximal d'os par sommet
+- **Déformation libre (FFD)** animée en mode Animation, avec rayon doux
+- **Maillages liés** : même forme et mêmes poids, autre image (vêtements, expressions), avec ou sans
+  les déformations du parent
+- Retour possible au rectangle ou à une image simple
 
 ### Courbes (v0.4)
 

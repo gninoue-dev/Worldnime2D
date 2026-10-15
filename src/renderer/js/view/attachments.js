@@ -10,6 +10,8 @@
 
 import { Container, Graphics, Matrix, Mesh, MeshGeometry, Shader, Sprite, UniformGroup } from 'pixi.js';
 import { RegionAttachment } from '../model/attachment.js';
+import { MeshAttachment } from '../model/mesh.js';
+import { affineFromTriangles } from '../model/geometry.js';
 import { hexToRgba } from '../model/color.js';
 
 const VERTEX = /* glsl */ `
@@ -84,11 +86,16 @@ export class AttachmentsView {
     const used = new Set();
     for (const slot of skeleton.drawOrder) {
       const att = skeleton.currentAttachment(slot);
-      if (!(att instanceof RegionAttachment)) continue;
-      const verts = att.worldVertices(slot.bone);
+      if (!att) continue;
+      const isMesh = att instanceof MeshAttachment;
+      if (!isMesh && !(att instanceof RegionAttachment)) continue;
+      const geo = isMesh ? meshGeometry(skeleton, slot, att) : {
+        verts: att.worldVertices(slot.bone), uvs: RegionAttachment.UVS, indices: RegionAttachment.INDICES, key: 'region',
+      };
+      if (!geo) continue;
       const entry = this.library.get(att.imagePath);
       if (!entry) {
-        if (!ghost) this.drawMissing(verts);
+        if (!ghost) this.drawMissing(geo);
         continue;
       }
       used.add(slot.name);
@@ -99,9 +106,10 @@ export class AttachmentsView {
         for (let i = 0; i < 3; i++) light[i] *= ghost.color[i];
         light[3] *= ghost.alpha;
       }
-      const item = this.useShader
-        ? this.shaderItem(slot, entry.texture, verts, light, ghost)
-        : this.spriteItem(slot, entry.texture, verts, light);
+      let item;
+      if (this.useShader) item = this.shaderItem(slot, entry.texture, geo, light, ghost);
+      else if (isMesh) item = this.trianglesItem(slot, entry.texture, geo, light);
+      else item = this.spriteItem(slot, entry.texture, geo.verts, light);
       item.mesh.blendMode = PIXI_BLEND[slot.blend] ?? 'normal';
       this.container.addChild(item.mesh);
     }
@@ -115,9 +123,9 @@ export class AttachmentsView {
     }
   }
 
-  shaderItem(slot, texture, verts, light, ghost) {
-    const item = this.meshItem(slot.name, texture);
-    item.geometry.positions = verts;
+  shaderItem(slot, texture, geo, light, ghost) {
+    const item = this.meshItem(slot.name, texture, geo);
+    item.geometry.positions = geo.verts;
     item.geometry.getBuffer('aPosition').update();
     item.uniforms.uniforms.uLight.set(light);
     const [dr, dg, db] = slot.pose.dark && !ghost ? hexToRgba(slot.pose.dark) : [0, 0, 0];
@@ -130,9 +138,9 @@ export class AttachmentsView {
   // (en pixels, Y vers le bas) sur les coins de l'image dans le monde.
   spriteItem(slot, texture, v, light) {
     let item = this.pool.get(slot.name);
-    if (!item || item.texture !== texture) {
+    if (!item || item.kind !== 'sprite' || item.texture !== texture) {
       if (item) this.destroyItem(item);
-      item = { mesh: new Sprite(texture), texture };
+      item = { kind: 'sprite', mesh: new Sprite(texture), texture };
       this.pool.set(slot.name, item);
     }
     const w = texture.width;
@@ -144,18 +152,51 @@ export class AttachmentsView {
       v[6], v[7],
     );
     item.mesh.setFromMatrix(m);
-    item.mesh.tint = (Math.round(light[0] * 255) << 16) | (Math.round(light[1] * 255) << 8) | Math.round(light[2] * 255);
+    item.mesh.tint = rgbToNumber(light);
     item.mesh.alpha = light[3];
     return item;
   }
 
-  meshItem(slotName, texture) {
+  // Mode de secours pour un maillage : chaque triangle est rempli avec la texture,
+  // placée par la transformation affine qui envoie ses coins d'image sur ses coins dans le monde.
+  trianglesItem(slot, texture, geo, light) {
+    let item = this.pool.get(slot.name);
+    if (!item || item.kind !== 'triangles') {
+      if (item) this.destroyItem(item);
+      item = { kind: 'triangles', mesh: new Graphics(), texture };
+      this.pool.set(slot.name, item);
+    }
+    item.texture = texture;
+    const g = item.mesh;
+    g.clear();
+    const { verts: v, uvs, indices } = geo;
+    const w = texture.width;
+    const h = texture.height;
+    const tint = rgbToNumber(light);
+    for (let t = 0; t < indices.length; t += 3) {
+      const [i, j, k] = [indices[t], indices[t + 1], indices[t + 2]];
+      const src = [[uvs[i * 2] * w, uvs[i * 2 + 1] * h], [uvs[j * 2] * w, uvs[j * 2 + 1] * h], [uvs[k * 2] * w, uvs[k * 2 + 1] * h]];
+      const dst = [[v[i * 2], v[i * 2 + 1]], [v[j * 2], v[j * 2 + 1]], [v[k * 2], v[k * 2 + 1]]];
+      const m = affineFromTriangles(src, dst);
+      if (!m) continue;
+      g.poly(dst.flat()).fill({
+        texture, matrix: new Matrix(m.a, m.b, m.c, m.d, m.tx, m.ty), textureSpace: 'global', color: tint, alpha: light[3],
+      });
+    }
+    return item;
+  }
+
+  meshItem(slotName, texture, geo) {
     let item = this.pool.get(slotName);
+    if (item && item.kind !== 'shader') {
+      this.destroyItem(item);
+      item = null;
+    }
     if (!item) {
       const geometry = new MeshGeometry({
-        positions: new Float32Array(8),
-        uvs: new Float32Array(RegionAttachment.UVS),
-        indices: new Uint32Array(RegionAttachment.INDICES),
+        positions: new Float32Array(geo.verts.length),
+        uvs: new Float32Array(geo.uvs),
+        indices: new Uint32Array(geo.indices),
       });
       const uniforms = new UniformGroup({
         uLight: { value: new Float32Array([1, 1, 1, 1]), type: 'vec4<f32>' },
@@ -166,8 +207,19 @@ export class AttachmentsView {
         resources: { uTexture: texture.source, tint: uniforms },
       });
       const mesh = new Mesh({ geometry, shader, texture });
-      item = { mesh, geometry, shader, uniforms, texture };
+      item = { kind: 'shader', mesh, geometry, shader, uniforms, texture, key: geo.key };
       this.pool.set(slotName, item);
+    } else if (item.key !== geo.key) {
+      // Nouvelle topologie (sommets ajoutés, image changée en maillage…) : nouvelle géométrie.
+      const old = item.geometry;
+      item.geometry = new MeshGeometry({
+        positions: new Float32Array(geo.verts.length),
+        uvs: new Float32Array(geo.uvs),
+        indices: new Uint32Array(geo.indices),
+      });
+      item.mesh.geometry = item.geometry;
+      old.destroy();
+      item.key = geo.key;
     }
     if (item.texture !== texture || item.texture.destroyed) {
       item.texture = texture;
@@ -177,11 +229,27 @@ export class AttachmentsView {
     return item;
   }
 
-  // Image introuvable dans le dossier : un cadre rouge barré, comme un emplacement vide.
-  drawMissing(v) {
+  // Image introuvable dans le dossier : les triangles en rouge, comme un emplacement vide.
+  drawMissing({ verts: v, indices }) {
     const g = this.missing;
-    g.poly(Array.from(v)).fill({ color: 0xff3b3b, alpha: 0.12 });
-    g.moveTo(v[0], v[1]).lineTo(v[4], v[5]).moveTo(v[2], v[3]).lineTo(v[6], v[7]);
-    g.poly(Array.from(v)).stroke({ width: 1, color: 0xff5252, pixelLine: true });
+    for (let t = 0; t < indices.length; t += 3) {
+      const pts = [indices[t], indices[t + 1], indices[t + 2]].flatMap((i) => [v[i * 2], v[i * 2 + 1]]);
+      g.poly(pts).fill({ color: 0xff3b3b, alpha: 0.12 }).stroke({ width: 1, color: 0xff5252, pixelLine: true });
+    }
   }
+}
+
+function rgbToNumber(c) {
+  return (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);
+}
+
+// Géométrie d'un maillage dans la pose courante. key change quand la topologie ou les UV changent.
+function meshGeometry(skeleton, slot, att) {
+  const src = skeleton.meshSource(slot, att);
+  if (!src.triangles.length) return null;
+  const verts = skeleton.attachmentVertices(slot, att);
+  let h = src.triangles.length * 31 + src.uvs.length;
+  for (const t of src.triangles) h = (h * 33 + t) | 0;
+  for (const [u, v] of src.uvs) h = (h * 33 + Math.round(u * 1e5) * 7 + Math.round(v * 1e5)) | 0;
+  return { verts, uvs: src.flatUVs(), indices: src.triangles, key: `mesh:${src.uvs.length}:${h}` };
 }

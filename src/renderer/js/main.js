@@ -130,6 +130,7 @@ async function start() {
   const actions = {
     hasImage: (path) => Boolean(library.get(path)),
     imagePaths: () => library.list.map((e) => e.path),
+    imageAlpha: (path) => library.alphaInfo(path),
     imageSize: (path) => {
       const e = library.get(path);
       return e ? { width: e.width, height: e.height } : null;
@@ -478,6 +479,7 @@ async function start() {
     redo: () => editor.redo(),
     duplicate: () => editor.duplicateSelected(),
     delete: () => {
+      if (editor.meshTool === 'edit' && viewport.mesh.deleteSelected()) return;
       if (!editor.deleteSelected() && editor.selected && !editor.selected.parent) {
         notify('La racine ne peut pas être supprimée.');
       }
@@ -531,6 +533,10 @@ async function start() {
 
   window.addEventListener('keydown', (e) => {
     if (isTyping(e) || document.querySelector('dialog[open]')) return;
+    if (e.key === 'Escape' && editor.meshTool && !viewport.drag) {
+      editor.setMeshTool(editor.meshTool);
+      return;
+    }
     const ctrl = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (ctrl && key === 'z' && !e.shiftKey) run('undo');

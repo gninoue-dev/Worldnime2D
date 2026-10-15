@@ -43,6 +43,12 @@ export class Editor extends EventTarget {
     this.onion = false;
     // Plage de lecture { start, end } en images (null = toute l'animation).
     this.range = null;
+    // Outil de maillage : null, 'edit', 'weights' (Configuration) ou 'deform' (Animation).
+    this.meshTool = null;
+    // Pinceau de poids : rayon en pixels écran, force par passage, os peint.
+    this.brush = { radius: 40, strength: 0.25, bone: null };
+    // Rayon doux (pixels écran) : les sommets voisins suivent le sommet déplacé.
+    this.softRadius = 0;
     // Clés sélectionnées dans la timeline : { owner, name, type, key }.
     this.selectedKeys = [];
     this.reset(new Skeleton());
@@ -240,9 +246,15 @@ export class Editor extends EventTarget {
     sk.updateWorldTransform();
   }
 
+  setMeshTool(tool) {
+    this.meshTool = this.meshTool === tool ? null : tool;
+    this.emit('meshtool');
+  }
+
   setMode(mode) {
     if (mode === this.mode) return;
     this.playing = false;
+    this.meshTool = null;
     if (mode === 'animate' && !this.animation) {
       if (this.skeleton.animations.length === 0) {
         this.apply(() => {

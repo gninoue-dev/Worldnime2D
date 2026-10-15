@@ -29,12 +29,15 @@ export class Slot {
     this.attachment = null;
     this.blend = BLEND_MODES.normal;
     // Pose courante (modifiée par les animations).
-    this.pose = { color: WHITE, dark: null, attachment: null };
+    // deform : décalages des sommets (maillage), pour la pièce jointe deformFor.
+    this.pose = { color: WHITE, dark: null, attachment: null, deform: null, deformFor: null };
   }
 
   setToSetupPose() {
     this.pose.color = this.color;
     this.pose.dark = this.dark;
     this.pose.attachment = this.attachment;
+    this.pose.deform = null;
+    this.pose.deformFor = null;
   }
 }

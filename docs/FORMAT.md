@@ -93,6 +93,31 @@ ses pièces jointes, par nom. Type `region` (une image), le seul en v0.2 :
 
 Couleur affichée d'un pixel : `image × (slot.color × attachment.color) + (1 − image) × slot.dark`.
 
+### Maillages (`"type": "mesh"`)
+
+| Champ | Rôle |
+|---|---|
+| `path`, `color`, `width`, `height` | Comme pour une région |
+| `uvs` | Coordonnées d'image de chaque sommet, aplaties `[u0, v0, u1, v1, …]` (0 à 1, v vers le bas) |
+| `triangles` | Indices des sommets, par trois |
+| `hull` | Nombre de sommets du contour (les premiers, dans l'ordre) |
+| `edges` | Arêtes imposées, aplaties `[a0, b0, a1, b1, …]` (facultatif) |
+| `vertices` | Sans poids : positions dans le repère de l'os du slot `[x0, y0, x1, y1, …]` |
+| `weights` | Avec poids : pour chaque sommet, `[os, x, y, poids, os, x, y, poids, …]` où `x, y` est la position du sommet dans le repère de cet os |
+
+Position monde d'un sommet pondéré : somme sur ses os de `poids × (matrice monde de l'os × (x, y))`.
+
+### Maillages liés (`"type": "linkedmesh"`)
+
+`parent` : nom d'un maillage du même slot dont on reprend `uvs`, `triangles`, `vertices`/`weights` ;
+`timelines` (vrai par défaut) : suivre aussi ses déformations animées.
+
+### Déformations animées
+
+Dans une animation, `"deform": { skin: { slot: { pièce jointe: [ { "time", "vertices", "curve" } ] } } }`.
+`vertices` contient des décalages ajoutés aux positions locales : deux nombres par sommet (sans poids)
+ou deux nombres par couple sommet-os (avec poids, dans l'ordre de `weights`). Absent = aucun décalage.
+
 ## `events`
 
 Définitions des événements, par nom : `int`, `float`, `string` (valeurs par défaut),
@@ -143,6 +168,7 @@ Un slot absent de la liste (ajouté après coup) se place devant tous ceux qui l
 - `1` : v0.1, os seulement.
 - `2` : v0.2, slots, skins, dossier d'images, image de référence.
 - `3` : v0.3, animations, événements, cadence de la timeline.
+- `4` : v0.5, maillages, maillages liés, poids, déformations animées.
 
 Une version de l'éditeur lit tous les fichiers plus anciens. `formatVersion` augmente quand le format change. Une version de l'éditeur refuse un fichier
 dont le `formatVersion` est plus récent que ce qu'elle connaît.

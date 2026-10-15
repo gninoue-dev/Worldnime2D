@@ -15,6 +15,11 @@ import { round } from './math.js';
 export const BONE_TIMELINES = ['rotate', 'translate', 'scale', 'shear'];
 export const SLOT_TIMELINES = ['attachment', 'rgba', 'rgba2'];
 
+// Clé interne d'une timeline de déformation : skin, slot et pièce jointe.
+export function deformKey(slot, attachment, skin = 'default') {
+  return JSON.stringify([skin, slot, attachment]);
+}
+
 export const TIMELINE_LABELS = {
   rotate: 'Rotation',
   translate: 'Position',
@@ -24,6 +29,7 @@ export const TIMELINE_LABELS = {
   rgba: 'Couleur',
   rgba2: 'Couleur + sombre',
   drawOrder: 'Ordre d\'affichage',
+  deform: 'Déformation',
   events: 'Événements',
 };
 
@@ -51,6 +57,8 @@ export class Animation {
     this.slots = new Map();
     // Clés { time, order: [noms des slots du fond vers l'avant] | null (= ordre de base) }
     this.drawOrder = [];
+    // deformKey(slot, pièce jointe, skin) → clés { time, vertices: [décalages] }
+    this.deform = new Map();
     // Clés { time, name, int, float, string, volume, balance }
     this.events = [];
   }
@@ -59,6 +67,7 @@ export class Animation {
   *timelines() {
     for (const [name, tls] of this.bones) for (const [type, keys] of Object.entries(tls)) yield { owner: 'bone', name, type, keys };
     for (const [name, tls] of this.slots) for (const [type, keys] of Object.entries(tls)) yield { owner: 'slot', name, type, keys };
+    for (const [name, keys] of this.deform) yield { owner: 'deform', name, type: 'deform', keys };
     if (this.drawOrder.length) yield { owner: 'drawOrder', name: '', type: 'drawOrder', keys: this.drawOrder };
     if (this.events.length) yield { owner: 'events', name: '', type: 'events', keys: this.events };
   }
@@ -82,6 +91,13 @@ export class Animation {
   timeline(owner, name, type, create = false) {
     if (owner === 'drawOrder') return this.drawOrder;
     if (owner === 'events') return this.events;
+    if (owner === 'deform') {
+      if (!this.deform.has(name)) {
+        if (!create) return null;
+        this.deform.set(name, []);
+      }
+      return this.deform.get(name);
+    }
     const map = owner === 'bone' ? this.bones : this.slots;
     let tls = map.get(name);
     if (!tls) {
@@ -126,6 +142,7 @@ export class Animation {
 
   // Retire les timelines vides.
   prune() {
+    for (const [name, keys] of this.deform) if (keys.length === 0) this.deform.delete(name);
     for (const map of [this.bones, this.slots]) {
       for (const [name, tls] of map) {
         for (const type of Object.keys(tls)) if (tls[type].length === 0) delete tls[type];
@@ -148,17 +165,34 @@ export class Animation {
 
   renameSlot(oldName, newName) {
     renameKey(this.slots, oldName, newName);
+    this.remapDeform(([skin, slot, att]) => (slot === oldName ? [skin, newName, att] : [skin, slot, att]));
     for (const k of this.drawOrder) if (k.order) k.order = k.order.map((n) => (n === oldName ? newName : n));
   }
 
   removeSlot(name) {
     this.slots.delete(name);
+    this.remapDeform(([skin, slot, att]) => (slot === name ? null : [skin, slot, att]));
     for (const k of this.drawOrder) if (k.order) k.order = k.order.filter((n) => n !== name);
   }
 
   // Une pièce jointe renommée : les clés qui l'affichent suivent.
   renameAttachment(slotName, oldName, newName) {
     for (const k of this.slots.get(slotName)?.attachment ?? []) if (k.name === oldName) k.name = newName;
+    this.remapDeform(([skin, slot, att]) => (slot === slotName && att === oldName ? [skin, slot, newName] : [skin, slot, att]));
+  }
+
+  removeDeform(slotName, attName) {
+    this.remapDeform(([skin, slot, att]) => (slot === slotName && att === attName ? null : [skin, slot, att]));
+  }
+
+  // Renomme ou supprime (null) des timelines de déformation.
+  remapDeform(fn) {
+    const next = new Map();
+    for (const [k, keys] of this.deform) {
+      const r = fn(JSON.parse(k));
+      if (r) next.set(deformKey(r[1], r[2], r[0]), keys);
+    }
+    this.deform = next;
   }
 
   renameEvent(oldName, newName) {
@@ -240,6 +274,22 @@ export class Animation {
       }
     }
 
+    for (const [k, keys] of this.deform) {
+      const [, slotName, attName] = JSON.parse(k);
+      const slot = skeleton.findSlot(slotName);
+      if (!slot) continue;
+      const v = sampleArray(keys, time);
+      if (!v) continue;
+      const p = slot.pose;
+      if (p.deformFor !== attName || !p.deform || p.deform.length !== v.length || alpha >= 1) {
+        const base = p.deformFor === attName && p.deform && p.deform.length === v.length ? p.deform : new Float32Array(v.length);
+        p.deform = Float32Array.from(v, (x, i) => base[i] + (x - base[i]) * alpha);
+      } else {
+        for (let i = 0; i < v.length; i++) p.deform[i] += (v[i] - p.deform[i]) * alpha;
+      }
+      p.deformFor = attName;
+    }
+
     if (this.drawOrder.length && alpha >= 0.5) {
       const i = frameIndex(this.drawOrder, time);
       const order = i < 0 ? null : this.drawOrder[i].order;
@@ -279,6 +329,19 @@ export function sample(keys, time, fields) {
   if (!n) return fields.map((f) => k[f]);
   const e = evaluateCurve(k.curve, (time - k.time) / (n.time - k.time));
   return fields.map((f) => k[f] + (n[f] - k[f]) * e);
+}
+
+// Tableau de décalages interpolé (une clé sans « vertices » vaut zéro partout).
+function sampleArray(keys, time) {
+  const i = frameIndex(keys, time);
+  if (i < 0) return null;
+  const k = keys[i];
+  const n = keys[i + 1];
+  const len = Math.max(k.vertices?.length ?? 0, n?.vertices?.length ?? 0);
+  const a = (j) => k.vertices?.[j] ?? 0;
+  if (!n) return Float32Array.from({ length: len }, (_, j) => a(j));
+  const e = evaluateCurve(k.curve, (time - k.time) / (n.time - k.time));
+  return Float32Array.from({ length: len }, (_, j) => a(j) + ((n.vertices?.[j] ?? 0) - a(j)) * e);
 }
 
 function sampleColor(keys, time, field) {
@@ -354,6 +417,19 @@ export function animationToJSON(anim) {
       }
     }
   }
+  if (anim.deform.size) {
+    out.deform = {};
+    for (const [k, keys] of anim.deform) {
+      const [skin, slot, att] = JSON.parse(k);
+      out.deform[skin] ??= {};
+      out.deform[skin][slot] ??= {};
+      out.deform[skin][slot][att] = keys.map((key) => {
+        const o = { time: round(key.time, 6) };
+        if (key.vertices?.some((v) => v !== 0)) o.vertices = key.vertices.map((v) => round(v, 3));
+        return curveOut(o, key);
+      });
+    }
+  }
   if (anim.drawOrder.length) out.drawOrder = anim.drawOrder.map((k) => ({ time: round(k.time, 6), order: k.order }));
   if (anim.events.length) {
     out.events = anim.events.map((k) => {
@@ -411,6 +487,21 @@ export function animationFromJSON(name, data) {
       });
     }
     anim.slots.set(slot, out);
+  }
+  for (const [skin, slots] of Object.entries(data.deform ?? {})) {
+    for (const [slot, atts] of Object.entries(slots)) {
+      for (const [att, keys] of Object.entries(atts)) {
+        const where = `${name}/deform/${slot}/${att}`;
+        anim.deform.set(deformKey(slot, att, skin), keys.map((k) => {
+          const out = keyBase(k, where);
+          if (k.vertices !== undefined) {
+            if (!Array.isArray(k.vertices)) throw new Error(`Déformation invalide (${where}).`);
+            out.vertices = k.vertices.map((v) => num(v, where));
+          }
+          return out;
+        }));
+      }
+    }
   }
   anim.drawOrder = (data.drawOrder ?? []).map((k) => {
     if (k.order !== null && !(Array.isArray(k.order) && k.order.every((n) => typeof n === 'string'))) {

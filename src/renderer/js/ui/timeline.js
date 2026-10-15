@@ -27,6 +27,7 @@ const TYPE_COLORS = {
   rgba2: '#ba68c8',
   drawOrder: '#90a4ae',
   events: '#fff176',
+  deform: '#4dd0e1',
 };
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -246,8 +247,11 @@ export class TimelinePanel {
     for (const slot of sk.slots) {
       const tls = anim.slots.get(slot.name);
       const selected = ed.selectedSlot === slot;
-      if (!tls && !selected) continue;
-      const list = Object.entries(tls ?? {}).map(([type, keys]) => ({ owner: 'slot', name: slot.name, type, keys }));
+      // Déformations des maillages de ce slot.
+      const deforms = [...anim.deform].filter(([k]) => JSON.parse(k)[1] === slot.name)
+        .map(([k, keys]) => ({ owner: 'deform', name: k, type: 'deform', keys, label: `Déform. ${JSON.parse(k)[2]}` }));
+      if (!tls && !selected && deforms.length === 0) continue;
+      const list = [...Object.entries(tls ?? {}).map(([type, keys]) => ({ owner: 'slot', name: slot.name, type, keys })), ...deforms];
       const key = `s:${slot.name}`;
       rows.push({ kind: 'slot', slot, label: `▢ ${slot.name}`, depth: 0, tls: list, key, selected, expandable: true });
       if (this.expanded.has(key)) {
@@ -256,6 +260,7 @@ export class TimelinePanel {
           if (!keys) continue;
           rows.push({ kind: 'sub', slot, label: TIMELINE_LABELS[type], depth: 1, type, tls: [{ owner: 'slot', name: slot.name, type, keys }] });
         }
+        for (const d of deforms) rows.push({ kind: 'sub', slot, label: d.label, depth: 1, type: 'deform', tls: [d] });
       }
     }
     return rows;

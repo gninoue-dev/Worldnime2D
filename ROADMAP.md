@@ -44,13 +44,13 @@ version par version. Chaque case cochée est faite et testée. Les autres sont p
 - [x] Éditeur de courbes (graph editor) avec poignées
 - [x] Préréglages de courbes
 
-## v0.5 — Maillages et poids
+## v0.5 — Maillages et poids ✅
 
-- [ ] Pièce jointe « maillage » : sommets, triangulation automatique, arêtes
-- [ ] Contour automatique d'après la transparence de l'image
-- [ ] Poids (skinning) : liaison de plusieurs os, peinture des poids, poids automatiques, lissage, élagage
-- [ ] Déformation libre (FFD) animable
-- [ ] Maillages liés (linked meshes) qui partagent les poids
+- [x] Pièce jointe « maillage » : sommets, triangulation automatique, arêtes
+- [x] Contour automatique d'après la transparence de l'image
+- [x] Poids (skinning) : liaison de plusieurs os, peinture des poids, poids automatiques, lissage, élagage
+- [x] Déformation libre (FFD) animable
+- [x] Maillages liés (linked meshes) qui partagent les poids
 
 ## v0.6 — Contraintes
 

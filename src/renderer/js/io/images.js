@@ -98,6 +98,14 @@ export class ImageLibrary extends EventTarget {
     this.dispatchEvent(new Event('change'));
   }
 
+  // Opacité de toute l'image : { alpha, width, height } (pour le contour automatique des maillages).
+  alphaInfo(path) {
+    const e = this.entries.get(path);
+    if (!e) return null;
+    if (!e.alpha) e.alpha = readAlpha(e.bitmap);
+    return { alpha: e.alpha, width: e.width, height: e.height };
+  }
+
   // Opacité (0 à 255) du pixel (u, v) de l'image, u et v entre 0 et 1. Sert à cliquer sur les images.
   alphaAt(path, u, v) {
     const e = this.entries.get(path);

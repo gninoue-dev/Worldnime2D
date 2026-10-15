@@ -7,12 +7,13 @@ import { Skeleton } from './skeleton.js';
 import { INHERIT, DEFAULT_BONE_COLOR } from './bone.js';
 import { BLEND_MODES } from './slot.js';
 import { RegionAttachment, ATTACHMENT_TYPES } from './attachment.js';
+import { MeshAttachment } from './mesh.js';
 import { WHITE, isRgb, isRgba } from './color.js';
 import { round } from './math.js';
 import { animationToJSON, animationFromJSON, EventData } from './animation.js';
 
 export const FORMAT_NAME = 'worldnime2d';
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 export const FILE_EXTENSION = 'wn2d';
 
 export function serializeProject(skeleton, meta = {}) {
@@ -86,6 +87,7 @@ export function serializeProject(skeleton, meta = {}) {
 }
 
 function serializeAttachment(att) {
+  if (att instanceof MeshAttachment) return serializeMesh(att);
   const out = {};
   if (att.type !== ATTACHMENT_TYPES.region) out.type = att.type;
   if (att.path !== null) out.path = att.path;
@@ -97,6 +99,27 @@ function serializeAttachment(att) {
   out.width = round(att.width, 3);
   out.height = round(att.height, 3);
   if (att.color !== WHITE) out.color = att.color;
+  return out;
+}
+
+function serializeMesh(m) {
+  const out = { type: m.parent ? 'linkedmesh' : 'mesh' };
+  if (m.path !== null) out.path = m.path;
+  if (m.color !== WHITE) out.color = m.color;
+  out.width = round(m.width, 3);
+  out.height = round(m.height, 3);
+  if (m.parent) {
+    out.parent = m.parent;
+    if (!m.timelines) out.timelines = false;
+    return out;
+  }
+  out.uvs = m.uvs.flatMap(([u, v]) => [round(u, 5), round(v, 5)]);
+  out.triangles = [...m.triangles];
+  out.hull = m.hull;
+  if (m.edges.length) out.edges = m.edges.flat();
+  if (m.weights) {
+    out.weights = m.weights.map((list) => list.flatMap((e) => [e.bone, round(e.x, 3), round(e.y, 3), round(e.w, 5)]));
+  } else out.vertices = m.vertices.flatMap(([x, y]) => [round(x, 3), round(y, 3)]);
   return out;
 }
 
@@ -191,12 +214,17 @@ export function parseProject(text) {
       const slot = skeleton.findSlot(slotName);
       if (!slot) throw new Error(`Slot introuvable dans la skin : « ${slotName} ».`);
       for (const [name, ad] of Object.entries(atts)) {
-        skeleton.addAttachment(slot, parseAttachment(name, ad, `« ${slotName}/${name} »`));
+        skeleton.addAttachment(slot, parseAttachment(name, ad, `« ${slotName}/${name} »`, skeleton));
       }
     }
   }
   for (const slot of skeleton.slots) {
     if (slot.attachment && !skeleton.getAttachment(slot, slot.attachment)) slot.attachment = null;
+  }
+  for (const { slotName, att } of skeleton.meshes()) {
+    if (!att.parent) continue;
+    const p = skeleton.defaultSkin.get(slotName, att.parent);
+    if (!(p instanceof MeshAttachment) || p.parent) throw new Error(`Maillage parent introuvable pour « ${slotName}/${att.name} ».`);
   }
 
   const fps = data.skeleton?.fps;
@@ -222,8 +250,56 @@ export function parseProject(text) {
   return skeleton;
 }
 
-function parseAttachment(name, ad, where) {
+function intArray(v, label, max) {
+  if (!Array.isArray(v) || !v.every((x) => Number.isInteger(x) && x >= 0 && x < max)) throw new Error(`Indices invalides pour ${label}.`);
+  return v;
+}
+
+function parseMesh(name, ad, where, skeleton) {
+  const m = new MeshAttachment(name);
+  m.path = str(ad.path, null, `path (${where})`);
+  m.width = num(ad.width, 32, `width (${where})`);
+  m.height = num(ad.height, 32, `height (${where})`);
+  if (ad.color !== undefined) {
+    if (!isRgba(ad.color)) throw new Error(`Couleur invalide pour ${where}.`);
+    m.color = ad.color.toLowerCase();
+  }
+  if (ad.type === 'linkedmesh') {
+    m.parent = str(ad.parent, null, `parent (${where})`);
+    if (!m.parent) throw new Error(`Maillage lié sans parent (${where}).`);
+    m.timelines = ad.timelines !== false;
+    return m;
+  }
+  if (!Array.isArray(ad.uvs) || ad.uvs.length % 2) throw new Error(`UV invalides (${where}).`);
+  const n = ad.uvs.length / 2;
+  for (let i = 0; i < n; i++) m.uvs.push([num(ad.uvs[i * 2], 0, where), num(ad.uvs[i * 2 + 1], 0, where)]);
+  m.triangles = intArray(ad.triangles ?? [], `triangles (${where})`, n);
+  if (m.triangles.length % 3) throw new Error(`Triangles invalides (${where}).`);
+  m.hull = num(ad.hull, n, `hull (${where})`);
+  const edges = intArray(ad.edges ?? [], `edges (${where})`, n);
+  for (let i = 0; i + 1 < edges.length; i += 2) m.edges.push([edges[i], edges[i + 1]]);
+  if (ad.weights) {
+    if (!Array.isArray(ad.weights) || ad.weights.length !== n) throw new Error(`Poids invalides (${where}).`);
+    m.weights = ad.weights.map((flat) => {
+      if (!Array.isArray(flat) || flat.length % 4 || flat.length === 0) throw new Error(`Poids invalides (${where}).`);
+      const list = [];
+      for (let i = 0; i < flat.length; i += 4) {
+        const bone = flat[i];
+        if (!skeleton.findBone(bone)) throw new Error(`Os inconnu dans les poids de ${where} : ${bone}.`);
+        list.push({ bone, x: num(flat[i + 1], 0, where), y: num(flat[i + 2], 0, where), w: num(flat[i + 3], 0, where) });
+      }
+      return list;
+    });
+  } else {
+    if (!Array.isArray(ad.vertices) || ad.vertices.length !== n * 2) throw new Error(`Sommets invalides (${where}).`);
+    for (let i = 0; i < n; i++) m.vertices.push([num(ad.vertices[i * 2], 0, where), num(ad.vertices[i * 2 + 1], 0, where)]);
+  }
+  return m;
+}
+
+function parseAttachment(name, ad, where, skeleton) {
   const type = ad.type ?? ATTACHMENT_TYPES.region;
+  if (type === 'mesh' || type === 'linkedmesh') return parseMesh(name, ad, where, skeleton);
   if (type !== ATTACHMENT_TYPES.region) throw new Error(`Type de pièce jointe non géré : ${type} (${where}).`);
   const att = new RegionAttachment(name);
   att.path = str(ad.path, null, `path (${where})`);

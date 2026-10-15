@@ -4,6 +4,7 @@ import { Bone, INHERIT, DEFAULT_BONE_COLOR } from './bone.js';
 import { Slot } from './slot.js';
 import { Skin } from './skin.js';
 import { Animation, EventData } from './animation.js';
+import { MeshAttachment } from './mesh.js';
 
 export const ROOT_NAME = 'root';
 
@@ -64,6 +65,7 @@ export class Skeleton {
   removeBone(bone) {
     if (!bone.parent) throw new Error('La racine ne peut pas être supprimée.');
     const doomed = new Set([bone, ...this.descendants(bone)]);
+    this.dropInfluences(new Set([...doomed].map((b) => b.name)));
     bone.parent.children = bone.parent.children.filter((c) => c !== bone);
     this.bones = this.bones.filter((b) => !doomed.has(b));
     for (const slot of this.slots.filter((sl) => doomed.has(sl.bone))) this.removeSlot(slot);
@@ -89,6 +91,7 @@ export class Skeleton {
     if (name === bone.name) return;
     if (this.findBone(name)) throw new Error(`Un os s'appelle déjà « ${name} ».`);
     for (const anim of this.animations) anim.renameBone(bone.name, name);
+    for (const m of this.meshes()) for (const list of m.att.weights ?? []) for (const e of list) if (e.bone === bone.name) e.bone = name;
     bone.name = name;
   }
 
@@ -247,8 +250,18 @@ export class Skeleton {
   }
 
   removeAttachment(slot, name) {
+    const att = this.getAttachment(slot, name);
+    // Les maillages liés à celui-ci deviennent indépendants (copie de sa géométrie).
+    if (att instanceof MeshAttachment && !att.parent) {
+      for (const other of this.defaultSkin.attachmentsOf(slot.name).values()) {
+        if (other.parent !== name) continue;
+        const copy = att.copy(other.name);
+        Object.assign(other, { vertices: copy.vertices, weights: copy.weights, uvs: copy.uvs, triangles: copy.triangles, hull: copy.hull, edges: copy.edges, parent: null });
+      }
+    }
     this.defaultSkin.remove(slot.name, name);
     if (slot.attachment === name) slot.attachment = null;
+    for (const anim of this.animations) anim.removeDeform(slot.name, name);
   }
 
   renameAttachment(slot, oldName, newName) {
@@ -265,6 +278,67 @@ export class Skeleton {
     this.defaultSkin.set(slot.name, name, att);
     if (slot.attachment === oldName) slot.attachment = name;
     for (const anim of this.animations) anim.renameAttachment(slot.name, oldName, name);
+    // Les maillages liés à celui-ci suivent.
+    for (const other of this.defaultSkin.attachmentsOf(slot.name).values()) if (other.parent === oldName) other.parent = name;
+  }
+
+  // --- Maillages ------------------------------------------------------------------------
+
+  // Tous les maillages de toutes les skins : { skin, slotName, att }.
+  *meshes() {
+    for (const skin of this.skins) {
+      for (const [slotName, map] of skin.attachments) {
+        for (const att of map.values()) if (att instanceof MeshAttachment) yield { skin, slotName, att };
+      }
+    }
+  }
+
+  // Maillage qui porte la géométrie (le parent d'un maillage lié).
+  meshSource(slot, att) {
+    if (!(att instanceof MeshAttachment) || !att.parent) return att;
+    const p = this.getAttachment(slot, att.parent);
+    return p instanceof MeshAttachment && !p.parent ? p : att;
+  }
+
+  // Nom de la pièce jointe dont la déformation s'applique (le parent d'un maillage lié qui suit ses timelines).
+  deformName(slot, att) {
+    return att.parent && att.timelines ? att.parent : att.name;
+  }
+
+  // Positions monde des sommets d'une pièce jointe (image ou maillage) dans la pose courante.
+  attachmentVertices(slot, att) {
+    if (!(att instanceof MeshAttachment)) return att.worldVertices(slot.bone);
+    const src = this.meshSource(slot, att);
+    const deform = slot.pose.deformFor === this.deformName(slot, att) ? slot.pose.deform : null;
+    const valid = deform && deform.length === src.deformLength ? deform : null;
+    return MeshAttachment.worldVertices(src, slot.bone, this, valid);
+  }
+
+  // Avant de supprimer des os : leurs influences disparaissent des maillages (les autres sont renormalisées).
+  // Un sommet qui n'a plus d'os est rattaché à l'os du slot, à sa position actuelle.
+  dropInfluences(boneNames) {
+    this.updateWorldTransform();
+    for (const { slotName, att } of this.meshes()) {
+      if (!att.weights || !att.weights.some((l) => l.some((e) => boneNames.has(e.bone)))) continue;
+      const slot = this.findSlot(slotName);
+      const world = MeshAttachment.worldVertices(att, slot.bone, this);
+      att.weights = att.weights.map((list, i) => {
+        const kept = list.filter((e) => !boneNames.has(e.bone));
+        if (kept.length === 0) {
+          if (boneNames.has(slot.bone.name)) return list;
+          const l = slot.bone.worldToLocal(world[i * 2], world[i * 2 + 1]);
+          return [{ bone: slot.bone.name, x: l.x, y: l.y, w: 1 }];
+        }
+        const total = kept.reduce((s, e) => s + e.w, 0);
+        return kept.map((e) => ({ ...e, w: e.w / total }));
+      });
+      this.clearDeform(slotName, att.name);
+    }
+  }
+
+  // Supprime les déformations animées d'une pièce jointe (après un changement de sommets ou de poids).
+  clearDeform(slotName, attName) {
+    for (const anim of this.animations) anim.removeDeform(slotName, attName);
   }
 
   // --- Animations -------------------------------------------------------------------
