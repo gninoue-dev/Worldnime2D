@@ -124,6 +124,17 @@ et parce que j'en ai besoin pour mes propres jeux.
 - Vue avec grille, zoom à la molette, déplacement (clic droit, clic molette ou Espace)
 - Projets enregistrés au format `.wn2d` (JSON lisible, [décrit ici](docs/FORMAT.md)), ouverture par double-clic
 
+## Formation vidéo
+
+Une formation en français, avec voix off et sous-titres, pour apprendre Worldnime2D pas à pas, même sans jamais avoir animé. Les vidéos sont dans la release [Formation vidéo](https://github.com/gninoue-dev/Worldnime2D/releases/tag/formation). D'autres leçons arrivent au fur et à mesure.
+
+| Leçon | Durée |
+|---|---|
+| [1. Découvrir Worldnime2D](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/01-interface.mp4) | 3 min |
+| [2. Mon premier projet](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/02-projet.mp4) | 3 min |
+
+Les vidéos sont fabriquées automatiquement par le logiciel lui-même (`tutorials/make.mjs`) : voir [tutorials/README.md](tutorials/README.md).
+
 ## Installation
 
 Les installeurs sont sur la page **[Releases](https://github.com/gninoue-dev/Worldnime2D/releases)**.

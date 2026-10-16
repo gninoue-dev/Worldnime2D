@@ -33,6 +33,8 @@ export class Director {
     this.pos = { x: 760, y: 470 };
     this.stepStart = performance.now();
     this.highlights = new Set();
+    // Répétition accélérée (make.mjs --rapide) : tout le minutage est divisé par speed.
+    this.speed = job.speed ?? 1;
     this.buildOverlay();
   }
 
@@ -86,12 +88,12 @@ export class Director {
   // --- Temps ---------------------------------------------------------------------------------
 
   wait(sec) {
-    return sleep(sec * 1000);
+    return sleep((sec * 1000) / this.speed);
   }
 
   // Attend un instant précis de l'étape en cours (en secondes depuis le début de la narration).
   async at(sec) {
-    const ms = this.stepStart + sec * 1000 - performance.now();
+    const ms = this.stepStart + (sec * 1000) / this.speed - performance.now();
     if (ms > 0) await sleep(ms);
   }
 
@@ -136,7 +138,7 @@ export class Director {
   async move(target, duration = 0.7, onStep = null) {
     const to = this.point(target);
     const from = { ...this.pos };
-    const ms = duration * 1000;
+    const ms = (duration * 1000) / this.speed;
     const t0 = performance.now();
     for (;;) {
       await raf();

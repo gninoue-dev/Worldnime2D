@@ -219,7 +219,9 @@ async function start() {
   editor.addEventListener('events', (e) => e.detail.forEach((k) => playEventSound(k)));
 
   // --- Panneaux -------------------------------------------------------------------------
-  new TreePanel(editor, document.getElementById('tree'), notify, actions);
+  const tree = new TreePanel(editor, document.getElementById('tree'), notify, actions);
+  // Les images se chargent après le projet : l'arbre doit retirer les « image manquante ».
+  library.addEventListener('change', () => tree.render());
   new DrawOrderPanel(editor, document.getElementById('draworder'), notify);
   new ImagesPanel(editor, library, document.getElementById('images'), actions);
   new PropertiesPanel(editor, document.getElementById('props'), notify, actions);

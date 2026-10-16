@@ -478,3 +478,28 @@ function makeZip(entries) {
   }
   return out;
 }
+
+// Images pour les cartes explicatives (adresses data:, autorisées par la CSP).
+async function dataUrl(canvas) {
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.readAsDataURL(blob);
+  });
+}
+
+export async function partDataUrl(name) {
+  return dataUrl(drawPart(name).canvas);
+}
+
+// Le personnage complet, morceaux superposés dans l'ordre d'affichage.
+export async function compositeDataUrl(names = BODY) {
+  const c = new OffscreenCanvas(W, H);
+  const ctx = c.getContext('2d');
+  for (const n of names) {
+    const p = drawPart(n);
+    ctx.drawImage(p.canvas, p.left, p.top);
+  }
+  return dataUrl(c);
+}

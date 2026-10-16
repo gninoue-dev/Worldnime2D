@@ -3,6 +3,8 @@
 //   node tutorials/make.mjs                 toutes les leçons
 //   node tutorials/make.mjs 03 05-images    seulement ces leçons (numéro ou identifiant)
 //   node tutorials/make.mjs --list          liste des leçons
+//   node tutorials/make.mjs --rapide 03     répétition accélérée (×4, sans voix ni assemblage) pour
+//                                           vérifier qu'une leçon se déroule sans erreur
 //
 // Pour chaque leçon : 1) la narration est lue par une voix de synthèse (Piper), étape par étape ;
 // 2) l'éditeur est lancé hors écran et la leçon le pilote, chaque étape durant au moins sa narration ;
@@ -38,6 +40,7 @@ if (args.includes('--list')) {
   for (const l of LESSONS) console.log(`${l.id.padEnd(28)} ${l.title}`);
   process.exit(0);
 }
+const FAST = args.includes('--rapide');
 const wanted = args.filter((a) => !a.startsWith('--'));
 const lessons = wanted.length ? LESSONS.filter((l) => wanted.some((w) => l.id === w || l.id.startsWith(`${w}-`))) : LESSONS;
 if (!lessons.length) {
@@ -127,7 +130,7 @@ function makeLesson(lesson) {
     lesson: lesson.id,
     index,
     count: LESSONS.length,
-    next: LESSONS[index + 1]?.title ?? null,
+    next: LESSONS[index + 1]?.title ?? lesson.next ?? null,
     fps: 30,
     width: 1920,
     height: 1080,
@@ -136,6 +139,7 @@ function makeLesson(lesson) {
     work,
     video: join(work, 'image.mp4'),
     timeline: join(work, 'timeline.json'),
+    speed: FAST ? 4 : 1,
   };
   const jobFile = join(work, 'job.json');
   writeFileSync(jobFile, JSON.stringify(job, null, 2));
@@ -147,6 +151,10 @@ function makeLesson(lesson) {
   });
   const timeline = existsSync(job.timeline) ? JSON.parse(readFileSync(job.timeline, 'utf8')) : null;
   if (r.status !== 0 || !timeline?.ok) throw new Error(`Enregistrement de « ${lesson.id} » échoué : ${timeline?.error ?? `code ${r.status}`}`);
+  if (FAST) {
+    console.log(`✔ répétition sans erreur (${Math.round(timeline.duration * job.speed)} s en vrai) : ${job.video}`);
+    return { id: lesson.id, duration: timeline.duration * job.speed };
+  }
 
   // Piste de voix : chaque narration posée à l'instant où son étape a commencé.
   const rate = voices.find(Boolean)?.wav.rate ?? 22050;

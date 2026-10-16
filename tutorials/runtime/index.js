@@ -24,6 +24,7 @@ async function main() {
     // La narration démarre ici ; les actions de l'étape se déroulent en même temps.
     await ctx.api.tutorialMark(`step-${i}`);
     d.stepStart = performance.now();
+    d.stepIndex = i;
     const actions = step.do ? Promise.resolve(step.do(d)) : Promise.resolve();
     await Promise.all([actions, d.wait(narration)]);
     await d.wait(step.pause ?? 0.45);

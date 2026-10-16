@@ -116,4 +116,15 @@ body.tuto #app { height: calc(100vh - 26px); margin-top: 26px; }
 .tuto-card li::before { content: ""; position: absolute; left: 4px; top: 10px; width: 14px; height: 14px; border-radius: 4px; background: #ffca28; }
 .tuto-card .foot { margin-top: 40px; font-size: 20px; color: #9fb3c8; }
 .tuto-card .schema { margin-top: 26px; }
+
+/* Carte « fichier à calques » : le dessin et sa pile de calques, comme dans Krita. */
+.tuto-layers { display: flex; gap: 48px; align-items: center; margin-top: 26px; }
+.tuto-layers .art { width: 360px; height: 410px; background: repeating-conic-gradient(#3a3f47 0% 25%, #30343b 0% 50%) 0 0 / 24px 24px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.tuto-layers .art img { max-width: 92%; max-height: 92%; }
+.tuto-layers .stack { flex: 1; max-width: 430px; background: #22252b; border: 1px solid #444; border-radius: 8px; padding: 8px; display: grid; gap: 3px; }
+.tuto-layers .stack .h { font-size: 16px; color: #9fb3c8; padding: 2px 6px 6px; }
+.tuto-layers .lay { display: flex; align-items: center; gap: 12px; padding: 2px 8px; background: #2d3139; border-radius: 4px; font-size: 16px; opacity: 0; transform: translateX(10px); transition: all .35s; }
+.tuto-layers .lay.on { opacity: 1; transform: none; }
+.tuto-layers .lay.hot { background: #3d4a5c; outline: 2px solid #ffca28; }
+.tuto-layers .lay img { width: 30px; height: 22px; object-fit: contain; background: #444a52; border-radius: 3px; }
 `;
