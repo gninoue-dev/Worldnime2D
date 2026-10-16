@@ -13,6 +13,10 @@ const FILE_FILTERS = [
 const IMAGE_RE = /\.(png|jpe?g|webp)$/i;
 const REPO_URL = 'https://github.com/gninoue-dev/Worldnime2D';
 const SELFTEST_DIR = process.env.WN2D_SELFTEST || null;
+// Enregistrement d'un tutoriel vidéo (tutorials/make.mjs) : fenêtre hors écran filmée.
+const tutorial = process.env.WN2D_TUTORIAL
+  ? require('./tutorial.cjs').setupTutorial({ ipcMain, dialog, Menu, app, getWin: () => win, jobFile: process.env.WN2D_TUTORIAL })
+  : null;
 
 let win = null;
 let rendererDirty = false;
@@ -33,13 +37,16 @@ function createWindow() {
     backgroundColor: '#1e1e1e',
     title: 'Worldnime2D',
     icon: path.join(__dirname, '..', '..', 'dist', 'icon.png'),
+    ...tutorial?.windowOptions,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      ...tutorial?.windowOptions.webPreferences,
     },
   });
+  tutorial?.attach(win);
 
   win.loadFile(path.join(__dirname, '..', '..', 'dist', 'index.html'));
 
@@ -180,6 +187,7 @@ ipcMain.handle('app:info', () => ({
   selftestDir: SELFTEST_DIR,
   selftestOra: process.env.WN2D_SELFTEST_ORA || null,
   selftestPsd: process.env.WN2D_SELFTEST_PSD || null,
+  tutorial: Boolean(tutorial),
   // Pour tester le mode de secours sans WebGL : WN2D_RENDERER=canvas.
   renderer: process.env.WN2D_RENDERER || 'webgl',
 }));
@@ -368,7 +376,7 @@ ipcMain.handle('selftest:done', async (_e, report) => {
 
 // --- Démarrage ----------------------------------------------------------------------
 
-if (!SELFTEST_DIR && !app.requestSingleInstanceLock()) {
+if (!SELFTEST_DIR && !tutorial && !app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', (_e, argv) => {

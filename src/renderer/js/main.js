@@ -670,6 +670,17 @@ async function start() {
   if (info.selftest) {
     runSelftest({ editor, viewport, api, library, actions, importLayers, info, setTab, timeline, runExport });
   }
+
+  // Tutoriels vidéo (tutorials/make.mjs) : le script des leçons est chargé à part.
+  if (info.tutorial) {
+    window.wn2dTutorial = {
+      editor, viewport, api, library, actions, importLayers, info, setTab, timeline, runExport, notify,
+      command: (cmd) => Promise.resolve(commands[cmd]()),
+    };
+    const script = document.createElement('script');
+    script.src = 'tutorial.js';
+    document.body.appendChild(script);
+  }
 }
 
 start().catch((err) => {

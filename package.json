@@ -29,6 +29,7 @@
       "src/main/**",
       "dist/**",
       "!dist/*.map",
+      "!dist/tutorial.js",
       "package.json"
     ],
     "fileAssociations": [

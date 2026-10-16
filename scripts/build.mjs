@@ -21,3 +21,15 @@ await build({
   minify: !watch,
   logLevel: 'info',
 });
+
+// Tutoriels vidéo : chargés seulement en mode tutoriel, exclus des installeurs (voir package.json).
+await build({
+  entryPoints: ['tutorials/runtime/index.js'],
+  outfile: 'dist/tutorial.js',
+  bundle: true,
+  format: 'iife',
+  platform: 'browser',
+  target: 'chrome120',
+  minify: false,
+  logLevel: 'warning',
+});

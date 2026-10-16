@@ -28,4 +28,10 @@ contextBridge.exposeInMainWorld('worldnime', {
   },
   selftestCapture: (name) => ipcRenderer.invoke('selftest:capture', name),
   selftestDone: (report) => ipcRenderer.invoke('selftest:done', report),
+  // Tutoriels vidéo (inactifs hors de tutorials/make.mjs).
+  tutorialJob: () => ipcRenderer.invoke('tutorial:job'),
+  tutorialStart: () => ipcRenderer.invoke('tutorial:start'),
+  tutorialMark: (label) => ipcRenderer.invoke('tutorial:mark', label),
+  tutorialAnswer: (list) => ipcRenderer.invoke('tutorial:answer', list),
+  tutorialFinish: (report) => ipcRenderer.invoke('tutorial:finish', report),
 });
