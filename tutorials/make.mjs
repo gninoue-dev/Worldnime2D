@@ -18,7 +18,7 @@ import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import electron from 'electron';
-import { LESSONS } from './lessons/index.js';
+import { LESSONS, PLANNED } from './lessons/index.js';
 import { forSpeech, subtitleChunks } from './speech.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -129,7 +129,7 @@ function makeLesson(lesson) {
   const job = {
     lesson: lesson.id,
     index,
-    count: LESSONS.length,
+    count: Math.max(LESSONS.length, PLANNED),
     next: LESSONS[index + 1]?.title ?? lesson.next ?? null,
     fps: 30,
     width: 1920,

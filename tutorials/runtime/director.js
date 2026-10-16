@@ -110,7 +110,9 @@ export class Director {
   // Champ du panneau Propriétés par son libellé, rendu visible. Par défaut la dernière occurrence :
   // la section de la sélection (Os, Slot…) vient après celle du squelette. n : n-ième occurrence.
   prop(label, n = -1) {
-    const rows = [...document.querySelectorAll('#props .prop-row')].filter((r) => r.querySelector('span')?.textContent.trim() === label);
+    // En mode Animation, le libellé commence par le losange de clé (◆ ou ◇).
+    const rows = [...document.querySelectorAll('#props .prop-row')]
+      .filter((r) => r.querySelector('span')?.textContent.replace(/^[◆◇]/, '').trim() === label);
     const row = rows.at(n);
     if (!row) throw new Error(`Propriété introuvable : ${label}`);
     row.scrollIntoView({ block: 'nearest' });
@@ -128,9 +130,10 @@ export class Director {
   // Ligne de l'arbre (ou d'un autre panneau à lignes) par son nom, rendue visible.
   // kind : 'bone', 'slot' ou 'att' pour distinguer un os et un slot du même nom.
   row(name, panel = '#tree', kind = null) {
-    const icon = { bone: '.bone-icon', slot: '.slot-icon', att: '.att-icon' }[kind];
-    const r = [...document.querySelectorAll(`${panel} .tree-row`)].find((e) => e.querySelector('.tree-label')?.textContent.trim() === name
-      && (!icon || e.querySelector(icon)));
+    const icon = { bone: '.bone-icon', slot: '.slot-icon', att: '.att-icon, .path-icon, .shape-icon' }[kind];
+    // Le libellé peut porter une précision après deux espaces (« (lié à …) », « [skin] »).
+    const label = (e) => e.querySelector('.tree-label')?.textContent.trim().split('  ')[0];
+    const r = [...document.querySelectorAll(`${panel} .tree-row`)].find((e) => label(e) === name && (!icon || e.querySelector(icon)));
     if (!r) throw new Error(`Ligne introuvable dans ${panel} : ${name}`);
     r.scrollIntoView({ block: 'nearest' });
     return r;
@@ -154,6 +157,28 @@ export class Director {
       return { x: r.left + (target.fx ?? 0.5) * r.width + (target.dx ?? 0), y: r.top + (target.fy ?? 0.5) * r.height + (target.dy ?? 0) };
     }
     return target;
+  }
+
+  // Point de la timeline : image donnée, sur la ligne dont le libellé commence par rowLabel
+  // (null : dans la règle, en haut).
+  tl(frame, rowLabel = null) {
+    const t = this.ctx.timeline;
+    t.draw();
+    const r = t.canvas.getBoundingClientRect();
+    const x = r.left + t.frameToX(frame);
+    if (rowLabel == null) return { x, y: r.top + 11 };
+    const rows = t.lastRows ?? t.rows();
+    const i = rows.findIndex((row) => row.label === rowLabel || row.label.replace(/^[▢◎] /, '') === rowLabel);
+    if (i < 0) throw new Error(`Ligne de timeline introuvable : ${rowLabel}`);
+    return { x, y: r.top + 22 + i * 20 - t.scrollY + 10 };
+  }
+
+  // Zone écran (rectangle) d'une ligne de la timeline, pour l'encadrer.
+  tlRow(rowLabel) {
+    const t = this.ctx.timeline;
+    const r = t.canvas.getBoundingClientRect();
+    const p = this.tl(0, rowLabel);
+    return { left: r.left, top: p.y - 10, width: r.width, height: 20 };
   }
 
   rect(target) {
@@ -411,6 +436,57 @@ export class Director {
     select.dispatchEvent(new Event('change', { bubbles: true }));
     // Comme une vraie liste refermée : les raccourcis clavier suivants vont à l'éditeur.
     select.blur();
+    await this.wait(0.3);
+  }
+
+  // Fait glisser un curseur (input range) jusqu'à une valeur, à la souris.
+  async slide(target, value, { duration = 1 } = {}) {
+    const input = typeof target === 'string' ? this.$(target) : target;
+    const r = input.getBoundingClientRect();
+    const min = Number(input.min || 0);
+    const max = Number(input.max || 1);
+    const at = (v) => ({ x: r.left + 7 + ((v - min) / (max - min)) * (r.width - 14), y: r.top + r.height / 2 });
+    await this.move(at(Number(input.value)), 0.6);
+    this.ripple();
+    this.down = true;
+    const step = Number(input.step || 0.01);
+    await this.move(at(value), duration, (p) => {
+      const v = min + ((p.x - r.left - 7) / (r.width - 14)) * (max - min);
+      input.value = String(Math.round(Math.min(max, Math.max(min, v)) / step) * step);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    this.down = false;
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await this.wait(0.25);
+  }
+
+  // Choisit une couleur (le sélecteur natif ne s'affiche pas : on montre une palette).
+  async pickColor(target, hex, { swatches = null } = {}) {
+    const input = typeof target === 'string' ? this.$(target) : target;
+    await this.click(input);
+    const colors = swatches ?? ['#ffffff', '#ffd54f', '#ff8a65', '#e57373', '#ba68c8', '#64b5f6', '#4db6ac', '#81c784', '#90a4ae', '#000000'];
+    if (!colors.includes(hex)) colors.splice(colors.length - 1, 0, hex);
+    const r = input.getBoundingClientRect();
+    const pal = el('div', 'tuto-palette');
+    for (const c of colors) {
+      const sw = el('span', c === hex ? 'on' : '');
+      sw.style.background = c;
+      pal.appendChild(sw);
+    }
+    pal.style.left = `${Math.min(r.left, window.innerWidth - 300)}px`;
+    pal.style.top = `${r.bottom + 4}px`;
+    this.root.appendChild(pal);
+    await this.wait(0.4);
+    await this.move(pal.querySelector('.on'), 0.6);
+    this.ripple();
+    await this.wait(0.25);
+    pal.remove();
+    input.value = hex;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.blur();
     await this.wait(0.3);
   }
 

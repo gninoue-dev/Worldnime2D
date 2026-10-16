@@ -39,3 +39,4 @@ systemd-run --user --scope -p MemoryMax=4G node tutorials/make.mjs
 - `runtime/director.js` : le « réalisateur » (curseur, clics, glisser, touches, encadrés, cartes).
 - `runtime/character.js` et `runtime/rig.js` : Ama, le personnage de démonstration, dessiné par le code, et son squelette.
 - `make.mjs` : voix, enregistrement, assemblage.
+- `godot-clip.mjs` : l'extrait « Ama dans Godot » de la leçon 22. Il faut Godot 4 (`node tutorials/godot-clip.mjs [chemin de godot]`), après avoir joué la leçon 21 (son export sert de personnage). Godot ouvre brièvement une fenêtre pendant l'enregistrement (Movie Maker), puis l'extrait est converti en WebP animé.

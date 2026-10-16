@@ -127,4 +127,10 @@ body.tuto #app { height: calc(100vh - 26px); margin-top: 26px; }
 .tuto-layers .lay.on { opacity: 1; transform: none; }
 .tuto-layers .lay.hot { background: #3d4a5c; outline: 2px solid #ffca28; }
 .tuto-layers .lay img { width: 30px; height: 22px; object-fit: contain; background: #444a52; border-radius: 3px; }
+.tuto-palette {
+  position: fixed; display: grid; grid-template-columns: repeat(6, 34px); gap: 8px; padding: 10px;
+  background: #252526; border: 1px solid #555; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.tuto-palette > span { width: 34px; height: 34px; border-radius: 6px; border: 2px solid #3c3c3c; }
+.tuto-palette > span.on { border-color: #ffca28; box-shadow: 0 0 0 2px #ffca28; }
 `;

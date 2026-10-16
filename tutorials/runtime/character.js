@@ -298,6 +298,21 @@ const PARTS = {
     ctx.textAlign = 'center';
     ctx.fillText('W2D', -55, -362);
   },
+  mat: (ctx) => {
+    // Mât en bois du drapeau, avec une boule dorée au sommet.
+    blob(ctx, (c) => c.rect(35, -440, 10, 300), '#8d5a2b');
+    blob(ctx, (c) => c.arc(40, -446, 9, 0, Math.PI * 2), GOLD);
+  },
+  drapeau_nuit: (ctx) => {
+    // Même forme que le drapeau, autres couleurs : pour les maillages liés.
+    const path = (c) => c.rect(-150, -430, 190, 116);
+    wax(ctx, path, INDIGO, GOLD, '#ffffff');
+    blob(ctx, (c) => c.rect(-150, -390, 190, 36), RED);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('W2D', -55, -362);
+  },
 };
 
 // Morceaux du personnage de base (ordre d'affichage : du fond vers l'avant).

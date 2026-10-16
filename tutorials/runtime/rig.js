@@ -106,6 +106,8 @@ export async function prepareAma(d, { slots = true, extraBones = true } = {}) {
 export async function saveAs(d, file = 'ama/ama.wn2d') {
   await d.answerNext(workDir(d, file));
   await d.ctx.command('save-as');
+  // Le message « Projet enregistré » ne doit pas apparaître au début de la vidéo.
+  document.getElementById('toast').className = 'toast';
   return workDir(d, file);
 }
 
@@ -142,4 +144,95 @@ export function addAmaBones(d, { skip = [], parents = {} } = {}) {
     }
     ed.skeleton.updateWorldTransform();
   });
+}
+
+// Chemin (points du monde) en arc de cercle autour de l'origine d'un os, de sa direction actuelle
+// jusqu'à l'angle monde voulu : pour un geste de rotation qui tourne dans le bon sens.
+export function arcTo(d, boneName, toDeg, { r = null, steps = 6 } = {}) {
+  const b = d.editor.skeleton.findBone(boneName);
+  const from = Math.atan2(b.tipY - b.worldY, b.tipX - b.worldX);
+  let to = (toDeg * Math.PI) / 180;
+  while (to - from > Math.PI) to -= 2 * Math.PI;
+  while (from - to > Math.PI) to += 2 * Math.PI;
+  const rad = r ?? Math.max(20, Math.hypot(b.tipX - b.worldX, b.tipY - b.worldY) * 0.6);
+  const pts = [];
+  for (let i = 1; i <= steps; i++) {
+    const a = from + ((to - from) * i) / steps;
+    pts.push([b.worldX + Math.cos(a) * rad, b.worldY + Math.sin(a) * rad]);
+  }
+  return { start: [b.worldX + Math.cos(from) * rad, b.worldY + Math.sin(from) * rad], path: pts };
+}
+
+// Tourne un os à la souris (outil Rotation déjà choisi) jusqu'à un angle monde.
+export async function rotateTo(d, boneName, toDeg, { duration = 1.2, mods = {} } = {}) {
+  const { start, path } = arcTo(d, boneName, toDeg);
+  await d.drag(start, path.at(-1), { duration, path, mods });
+}
+
+// Scène des maillages : un mât (os) et le drapeau accroché à son sommet, sur l'os « mat ».
+// chain : crée aussi les os du drapeau (drapeau1 → drapeau3, du mât vers le bout).
+// mesh : le drapeau est déjà un maillage (contour + grille) ; bind : lié aux os par poids automatiques.
+export const FLAG_BONES = [
+  ['mat', 'root', [40, 150], [40, 440]],
+  ['drapeau1', 'mat', [40, 372], [-15, 372]],
+  ['drapeau2', 'drapeau1', [-15, 372], [-80, 372]],
+  ['drapeau3', 'drapeau2', [-80, 372], [-150, 372]],
+];
+
+export async function prepareFlag(d, { chain = true, mesh = false, bind = false, extra = [] } = {}) {
+  const dir = workDir(d, 'drapeau/images');
+  const placed = await writeCharacter(d.api, dir, ['drapeau', 'drapeau_nuit', 'mat', ...extra]);
+  await d.ctx.command('new');
+  await d.ctx.library.setDir(dir);
+  const ed = d.editor;
+  ed.apply(() => {
+    ed.skeleton.images = dir;
+    ed.skeleton.name = 'drapeau';
+    for (const [name, parent, a, b] of FLAG_BONES) {
+      if (!chain && name !== 'mat') continue;
+      addBoneWorld(ed.skeleton, name, parent, a, b);
+    }
+    ed.skeleton.updateWorldTransform();
+  });
+  const sk = ed.skeleton;
+  d.ctx.actions.attachImage('drapeau', sk.findBone('mat'), null, { x: placed.drapeau.cx, y: placed.drapeau.cy });
+  d.ctx.actions.attachImage('mat', sk.findBone('mat'), null, { x: placed.mat.cx, y: placed.mat.cy });
+  if (mesh) {
+    // Hors caméra, avec les boutons de l'application (ses propres classes de maillage).
+    const slot = sk.findSlot('drapeau');
+    ed.selectAttachment(slot, 'drapeau');
+    clickProp(d, 'Convertir en maillage');
+    clickProp(d, 'Ajouter des points intérieurs');
+    if (bind) {
+      for (const box of document.querySelectorAll('#props .checklist input')) {
+        if (FLAG_BONES.some(([n]) => n === box.value) !== box.checked) box.click();
+      }
+      clickProp(d, 'Lier aux os cochés');
+    }
+  }
+  d.placed = placed;
+  ed.select(sk.root);
+  d.viewport.frameAll();
+  // Le cadrage inclut l'origine, loin sous le drapeau : on se rapproche du drapeau.
+  const s = d.viewport.toScreen(10, 330);
+  d.viewport.zoomAt(s.x, s.y, 1.5);
+  return { dir, placed };
+}
+
+// Clic direct (hors caméra) sur un bouton du panneau Propriétés.
+export function clickProp(d, text) {
+  const b = [...document.querySelectorAll('#props .prop-button')].find((e) => e.textContent.includes(text));
+  if (!b) throw new Error(`Bouton introuvable : ${text}`);
+  b.click();
+}
+
+// Coordonnées monde des sommets d'un maillage (tableau de [x, y]).
+export function meshVerts(d, slotName, attName = slotName) {
+  const sk = d.editor.skeleton;
+  const slot = sk.findSlot(slotName);
+  const att = d.editor.animating ? sk.currentAttachment(slot) : sk.getAttachment(slot, attName);
+  const v = sk.attachmentVertices(slot, att);
+  const out = [];
+  for (let i = 0; i < v.length; i += 2) out.push([v[i], v[i + 1]]);
+  return out;
 }
