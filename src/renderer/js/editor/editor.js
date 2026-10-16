@@ -195,7 +195,8 @@ export class Editor extends EventTarget {
   // Ce qui est sélectionné : 'bone', 'slot', 'attachment' ou 'constraint'.
   get selectionKind() {
     if (this.selectedConstraint) return 'constraint';
-    if (this.selectedSlot && this.selectedAttachment) return 'attachment';
+    // Une pièce jointe d'une skin désactivée n'existe plus : on retombe sur son slot.
+    if (this.selectedSlot && this.selectedAttachment && this.attachment) return 'attachment';
     if (this.selectedSlot) return 'slot';
     return 'bone';
   }

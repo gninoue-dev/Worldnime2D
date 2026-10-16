@@ -139,7 +139,7 @@ export async function renderFrames(skeleton, library, animName, { fps = 30, scal
 
   const app = new Application();
   await app.init({
-    width, height, preference: renderer, antialias: true, preserveDrawingBuffer: true,
+    width, height, preference: renderer, antialias: true, preserveDrawingBuffer: true, autoStart: false,
     backgroundAlpha: background ? 1 : 0, background: background ?? 0x000000,
   });
   try {
@@ -164,7 +164,9 @@ export async function renderFrames(skeleton, library, animName, { fps = 30, scal
     }
     return { width, height, frames, fps };
   } finally {
-    app.destroy(true, { children: true });
+    // Surtout pas destroy(true) : PixiJS libérerait aussi ses réserves globales (lots de rendu),
+    // partagées avec le renderer de l'éditeur, qui planterait à l'image suivante.
+    app.destroy({ removeView: true }, { children: true });
   }
 }
 

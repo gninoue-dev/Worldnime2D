@@ -126,7 +126,7 @@ et parce que j'en ai besoin pour mes propres jeux.
 
 ## Formation vidéo
 
-Une formation en français, avec voix off et sous-titres, pour apprendre Worldnime2D pas à pas, même sans jamais avoir animé. Les vidéos sont dans la release [Formation vidéo](https://github.com/gninoue-dev/Worldnime2D/releases/tag/formation). D'autres leçons arrivent au fur et à mesure.
+Une formation en français, avec voix off et sous-titres, pour apprendre Worldnime2D pas à pas, même sans jamais avoir animé. Les vidéos sont dans la release [Formation vidéo](https://github.com/gninoue-dev/Worldnime2D/releases/tag/formation). 22 leçons, environ une heure en tout, des premiers os jusqu'à l'export vers un jeu Godot.
 
 | Leçon | Durée |
 |---|---|
@@ -136,6 +136,22 @@ Une formation en français, avec voix off et sous-titres, pour apprendre Worldni
 | [4. Organiser le squelette](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/04-organiser.mp4) | 3 min |
 | [5. Accrocher les images aux os](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/05-images.mp4) | 3 min |
 | [6. Transformer les os](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/06-transformer.mp4) | 4 min |
+| [7. Ordre d'affichage et slots](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/07-slots.mp4) | 3 min |
+| [8. Votre première animation](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/08-premiere-animation.mp4) | 3 min |
+| [9. La timeline en détail](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/09-timeline.mp4) | 3 min |
+| [10. Les courbes d'animation](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/10-courbes.mp4) | 3 min |
+| [11. Changer d'image, de couleur, et les événements](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/11-images-couleurs-evenements.mp4) | 3 min |
+| [12. Créer un maillage](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/12-maillage.mp4) | 3 min |
+| [13. Les poids : lier un maillage aux os](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/13-poids.mp4) | 3 min |
+| [14. Déformation libre et maillages liés](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/14-deformation.mp4) | 2 min |
+| [15. La cinématique inverse (IK)](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/15-ik.mp4) | 3 min |
+| [16. Contraintes de transformation et de chemin](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/16-transformation-chemin.mp4) | 2 min |
+| [17. La physique : ressorts et inertie](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/17-physique.mp4) | 2 min |
+| [18. Les skins : plusieurs tenues](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/18-skins.mp4) | 2 min |
+| [19. Collision, découpe et points](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/19-collision-decoupe-points.mp4) | 2 min |
+| [20. Aperçu des mélanges](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/20-melanges.mp4) | 2 min |
+| [21. Exporter : jeux, images, GIF et vidéo](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/21-export.mp4) | 2 min |
+| [22. Dans un jeu Godot](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/22-godot.mp4) | 2 min |
 
 Les vidéos sont fabriquées automatiquement par le logiciel lui-même (`tutorials/make.mjs`) : voir [tutorials/README.md](tutorials/README.md).
 

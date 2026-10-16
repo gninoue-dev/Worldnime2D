@@ -95,8 +95,12 @@ function setupTutorial({ ipcMain, dialog, Menu, app, getWin, jobFile }) {
     });
     // Sans cela, la fenêtre est ramenée à la taille de l'écran (ex. 1366×768 sur un portable).
     win.setContentSize(width, height);
-    win.webContents.on('did-finish-load', () => win.webContents.setZoomFactor(job.zoom ?? 1.25));
-    win.webContents.on('console-message', (event) => process.stdout.write(`[page] ${event.message}\n`));
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.setZoomFactor(job.zoom ?? 1.25);
+      // Pile complète des erreurs non attrapées, pour retrouver leur origine dans les sources.
+      win.webContents.executeJavaScript("addEventListener('error', (e) => e.error?.stack && console.warn('[pile] ' + e.error.stack))");
+    });
+    win.webContents.on('console-message', (event) => process.stdout.write(`[page] ${event.message}${event.level === 'error' && event.sourceId ? ` (${event.sourceId.split('/').pop()}:${event.lineNumber})` : ''}\n`));
     win.webContents.on('render-process-gone', (_e, d) => {
       process.stderr.write(`Page arrêtée : ${d.reason}\n`);
       app.exit(2);

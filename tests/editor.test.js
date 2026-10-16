@@ -166,3 +166,19 @@ test('étirer des clés dans le temps et plage de lecture', () => {
   editor.setRange(null);
   assert.equal(editor.range, null);
 });
+
+test("pièce jointe d'une skin désactivée : la sélection retombe sur le slot", () => {
+  const { editor, sk } = setup();
+  editor.apply(() => {
+    const fete = sk().addSkin('fete');
+    sk().addAttachment(sk().findSlot('main'), new RegionAttachment('foulard'), fete);
+    sk().activeSkins = ['fete'];
+  });
+  editor.selectAttachment(sk().findSlot('main'), 'foulard');
+  assert.equal(editor.selectionKind, 'attachment');
+  editor.apply(() => { sk().activeSkins = []; });
+  assert.equal(editor.attachment, null);
+  assert.equal(editor.selectionKind, 'slot');
+  editor.apply(() => { sk().activeSkins = ['fete']; });
+  assert.equal(editor.selectionKind, 'attachment');
+});
