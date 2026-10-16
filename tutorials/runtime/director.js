@@ -361,10 +361,19 @@ export class Director {
       await this.wait(0.15);
       input.value = '';
     }
+    // Un champ numérique refuse les valeurs intermédiaires (« - », « 1. ») et se viderait :
+    // on le passe en texte le temps de la frappe.
+    const numeric = input.type === 'number';
+    if (numeric) input.type = 'text';
     for (const ch of String(text)) {
       input.value += ch;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!numeric) input.dispatchEvent(new Event('input', { bubbles: true }));
       await this.wait(0.07);
+    }
+    if (numeric) {
+      const v = input.value;
+      input.type = 'number';
+      input.value = v;
     }
     await this.wait(0.2);
     if (enter) {
@@ -400,6 +409,8 @@ export class Director {
     select.value = opt.value;
     select.dispatchEvent(new Event('input', { bubbles: true }));
     select.dispatchEvent(new Event('change', { bubbles: true }));
+    // Comme une vraie liste refermée : les raccourcis clavier suivants vont à l'éditeur.
+    select.blur();
     await this.wait(0.3);
   }
 
