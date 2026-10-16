@@ -130,3 +130,16 @@ export async function importAma(d) {
   d.editor.select(d.editor.skeleton.root);
   d.viewport.frameAll();
 }
+
+// Os d'Ama créés hors caméra (sans toucher aux images). skip : os à ne pas créer ;
+// parents : parent à utiliser à la place du bon (pour montrer comment corriger une erreur).
+export function addAmaBones(d, { skip = [], parents = {} } = {}) {
+  const ed = d.editor;
+  ed.apply(() => {
+    for (const [name, parent, a, b] of AMA_BONES) {
+      if (skip.includes(name) || skip.some((s) => s.endsWith('*') && name.startsWith(s.slice(0, -1)))) continue;
+      addBoneWorld(ed.skeleton, name, parents[name] ?? parent, a, b);
+    }
+    ed.skeleton.updateWorldTransform();
+  });
+}

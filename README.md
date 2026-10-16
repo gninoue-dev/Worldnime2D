@@ -133,6 +133,8 @@ Une formation en français, avec voix off et sous-titres, pour apprendre Worldni
 | [1. Découvrir Worldnime2D](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/01-interface.mp4) | 3 min |
 | [2. Mon premier projet](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/02-projet.mp4) | 3 min |
 | [3. Construire le squelette](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/03-squelette.mp4) | 3 min |
+| [4. Organiser le squelette](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/04-organiser.mp4) | 3 min |
+| [5. Accrocher les images aux os](https://github.com/gninoue-dev/Worldnime2D/releases/download/formation/05-images.mp4) | 3 min |
 
 Les vidéos sont fabriquées automatiquement par le logiciel lui-même (`tutorials/make.mjs`) : voir [tutorials/README.md](tutorials/README.md).
 
