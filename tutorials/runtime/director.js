@@ -107,6 +107,35 @@ export class Director {
     return found;
   }
 
+  // Champ du panneau Propriétés par son libellé, rendu visible. Par défaut la dernière occurrence :
+  // la section de la sélection (Os, Slot…) vient après celle du squelette. n : n-ième occurrence.
+  prop(label, n = -1) {
+    const rows = [...document.querySelectorAll('#props .prop-row')].filter((r) => r.querySelector('span')?.textContent.trim() === label);
+    const row = rows.at(n);
+    if (!row) throw new Error(`Propriété introuvable : ${label}`);
+    row.scrollIntoView({ block: 'nearest' });
+    return row.querySelector('input, select, .checklist');
+  }
+
+  // Bouton du panneau Propriétés par son texte (début du texte suffit), rendu visible.
+  propButton(text) {
+    const b = [...document.querySelectorAll('#props .prop-button')].find((e) => e.textContent.trim().startsWith(text));
+    if (!b) throw new Error(`Bouton introuvable : ${text}`);
+    b.scrollIntoView({ block: 'nearest' });
+    return b;
+  }
+
+  // Ligne de l'arbre (ou d'un autre panneau à lignes) par son nom, rendue visible.
+  // kind : 'bone', 'slot' ou 'att' pour distinguer un os et un slot du même nom.
+  row(name, panel = '#tree', kind = null) {
+    const icon = { bone: '.bone-icon', slot: '.slot-icon', att: '.att-icon' }[kind];
+    const r = [...document.querySelectorAll(`${panel} .tree-row`)].find((e) => e.querySelector('.tree-label')?.textContent.trim() === name
+      && (!icon || e.querySelector(icon)));
+    if (!r) throw new Error(`Ligne introuvable dans ${panel} : ${name}`);
+    r.scrollIntoView({ block: 'nearest' });
+    return r;
+  }
+
   // Point de l'écran (pixels CSS) pour une cible :
   // [x, y] = point du monde dans la vue ; { x, y } = point écran ; élément ou sélecteur = son centre.
   point(target) {
@@ -177,11 +206,13 @@ export class Director {
   async click(target, { mods = {}, duration = 0.6, button = 0, double = false } = {}) {
     if (target != null) await this.move(target, duration);
     await this.wait(0.12);
-    const t = this.under();
-    if (!t) return;
+    if (!this.under()) return;
     const p = this.pos;
     const times = double ? 2 : 1;
+    let t = null;
     for (let i = 1; i <= times; i++) {
+      // L'interface peut se redessiner entre deux clics : on vise l'élément actuellement sous le curseur.
+      t = this.under();
       this.ripple();
       this.down = true;
       t.dispatchEvent(new PointerEvent('pointerdown', this.pointerInit('pointerdown', p, mods, button)));
@@ -199,7 +230,7 @@ export class Director {
       }
       if (double && i === 1) await this.wait(0.08);
     }
-    if (double) t.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, detail: 2 }));
+    if (double) this.under().dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, detail: 2 }));
     await this.wait(0.15);
   }
 

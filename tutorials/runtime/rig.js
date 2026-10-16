@@ -1,6 +1,6 @@
 // Préparation hors caméra : projets de départ des leçons (dossier d'images, personnage monté…).
 
-import { BODY, writeCharacter, writeBackdrop } from './character.js';
+import { BODY, writeCharacter, writeBackdrop, writeOra } from './character.js';
 
 const deg = (r) => (r * 180) / Math.PI;
 
@@ -120,4 +120,13 @@ export function setKeys(d, boneName, type, keys) {
       else ed.animation.setKey('bone', boneName, type, { time, x: v[0], y: v[1] });
     }
   });
+}
+
+// Projet de la leçon 2 : Ama importée depuis son fichier ORA, toutes les images sur l'os racine.
+export async function importAma(d) {
+  await writeOra(d.api, workDir(d, 'dessins'), 'ama.ora');
+  await d.ctx.command('new');
+  await d.ctx.importLayers(workDir(d, 'dessins/ama.ora'), workDir(d, 'ama/images'));
+  d.editor.select(d.editor.skeleton.root);
+  d.viewport.frameAll();
 }
