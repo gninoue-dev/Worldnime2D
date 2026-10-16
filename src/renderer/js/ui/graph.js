@@ -120,7 +120,8 @@ export class GraphView {
     const ed = this.editor;
     const channels = this.channels();
     this.lastChannels = channels;
-    this.fit(channels, rulerH + 14, h - 14);
+    // Pendant un glisser, l'échelle verticale reste figée : sinon la clé fuirait sous la souris.
+    if (!this.drag || this.vlo === undefined) this.fit(channels, rulerH + 14, h - 14);
 
     // Légende à gauche.
     ctx.fillStyle = 'rgba(0,0,0,0.12)';

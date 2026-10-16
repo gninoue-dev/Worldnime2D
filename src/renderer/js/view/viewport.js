@@ -669,7 +669,10 @@ export class Viewport {
   // sauf si l'on clique sur la pièce jointe déjà sélectionnée.
   hitTest(sx, sy) {
     const ed = this.editor;
-    if (ed.selectionKind === 'attachment') {
+    // (Un maillage lié à des os ne se transforme pas à la main : là, l'os sous le pointeur l'emporte.)
+    const sel = ed.attachment;
+    const movable = !(sel instanceof MeshAttachment && (sel.weights || sel.parent));
+    if (ed.selectionKind === 'attachment' && movable) {
       const att = this.hitAttachment(sx, sy);
       if (att && att.slot === ed.selectedSlot && att.name === ed.selectedAttachment) return att;
     }
@@ -1223,5 +1226,8 @@ function snapPoint(start, p) {
 
 export function isTyping(e) {
   const t = e.target;
+  // Une case à cocher, un curseur ou un choix de couleur ne reçoivent pas de texte :
+  // les raccourcis (Ctrl+Z, R, T…) doivent continuer de marcher après un clic dessus.
+  if (t?.tagName === 'INPUT' && ['checkbox', 'radio', 'range', 'color', 'button'].includes(t.type)) return false;
   return t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
 }

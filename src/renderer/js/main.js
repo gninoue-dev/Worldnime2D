@@ -162,10 +162,14 @@ async function start() {
           att.rotation = -b.worldRotationX;
           att.scaleX = 1 / (b.worldScaleX || 1);
           att.scaleY = 1 / (b.worldScaleY || 1);
+          const current = slot && sk.currentAttachment(slot);
           if (worldPos) {
             const l = b.worldToLocal(worldPos.x, worldPos.y);
             att.x = l.x;
             att.y = l.y;
+          } else if (current instanceof RegionAttachment) {
+            // Nouvelle image d'un slot qui en a déjà une : elle prend la même place (ex. yeux ouverts / fermés).
+            Object.assign(att, { x: current.x, y: current.y, rotation: current.rotation, scaleX: current.scaleX, scaleY: current.scaleY });
           }
           sk.addAttachment(target, att);
         }
